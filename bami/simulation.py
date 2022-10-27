@@ -19,6 +19,8 @@ from pyipv8.simulation.discrete_loop import DiscreteLoop
 from pyipv8.simulation.simulation_endpoint import SimulationEndpoint
 
 from bami.settings import SimulationSettings
+from hidra.settings import HIDRASettings
+from hidra.utils import get_peer_id
 
 
 class BamiSimulation(TaskManager):
@@ -55,8 +57,8 @@ class BamiSimulation(TaskManager):
 
     async def start_ipv8_nodes(self) -> None:
         for peer_id in range(1, self.settings.peers + 1):
-            # if peer_id % 100 == 0:
-            # print("Created %d peers..." % peer_id)
+            if peer_id % 100 == 0:
+                print("Created %d peers..." % peer_id)
             endpoint = SimulationEndpoint()
             config = self.get_ipv8_builder(peer_id)
             config.set_log_level(self.settings.logging_level)
@@ -176,4 +178,67 @@ class BamiSimulation(TaskManager):
         await self.start_simulation()
         self.on_simulation_finished()
 
+        # HIDRA
+        self.print_final_statistics()
         await sleep(5)  # To avoid asyncio errors
+
+    #########
+    # HIDRA #
+    #########
+    def print_final_statistics(self):
+        self.print_peers()
+        self.print_events()
+        self.print_containers()
+        self.print_messages()
+        if HIDRASettings.enable_free_riding:
+            self.print_experiments()
+
+    def print_peers(self):
+        print("-------------------- Peers --------------------")
+        for peer in self.nodes:
+            peer_id = get_peer_id(peer.overlay.my_peer)
+            print("[" + peer_id + "]", "offers", str(peer.overlay.peers[peer_id].max_usage))
+
+    def print_events(self):
+        print("\n-------------------- Events --------------------")
+        for peer in self.nodes:
+            peer_id = get_peer_id(peer.overlay.my_peer)
+            print("[" + peer_id + "]", len(peer.overlay.events), "events:")
+            for k, v in peer.overlay.events.items():
+                print(" - EID=" + str(k), v.applicant, v.start_time, v.container_id, v.usages, v.votes, v.solver,
+                      v.end_time)
+
+    def print_containers(self):
+        print("\n------------------ Containers ------------------")
+        for peer in self.nodes:
+            peer_id = get_peer_id(peer.overlay.my_peer)
+            c_count = 0
+            for k, v in peer.overlay.containers.items():
+                if v.host == peer_id:
+                    c_count += 1
+            print("[" + peer_id + "]", c_count, "containers:")
+            for k, v in peer.overlay.containers.items():
+                if v.host == peer_id:
+                    print(" - CID=" + str(k), v.image_tag)
+
+    def print_messages(self):
+        print("\n------------------- Messages -------------------")
+        po_count = e_count = ne_count = er_count = vs_count = es_count = 0
+        peers_count = SimulationSettings.peers
+        for peer in self.nodes:
+            po_count += peer.overlay.po_msg_count
+            e_count += peer.overlay.e_count
+            ne_count += peer.overlay.ne_msg_count
+            er_count += peer.overlay.er_msg_count
+            vs_count += peer.overlay.vs_msg_count
+            es_count += peer.overlay.es_msg_count
+        print("HIDRA events:", e_count,
+              "\nPeerOffer:", po_count, "of", (peers_count * (peers_count - 1)),
+              "\nNewEvent:", ne_count, "of", (peers_count - 1) * e_count,
+              "\nEventReply:", er_count, "of", ((peers_count - 1) ** 2) * e_count,
+              "\nVoteSolver:", vs_count, "of", (peers_count * (peers_count - 1)) * e_count,
+              "\nEventSolved:", es_count, "of", (peers_count - 1) * e_count)
+
+    def print_experiments(self):
+        print("\n----------------- Experiments -----------------")
+        print("😈 [" + str(self.nodes[0].overlay.free_rider) + "] 😈")

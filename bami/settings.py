@@ -5,7 +5,7 @@ from typing import Optional
 @dataclass
 class SimulationSettings:
     # Number of IPv8 peers.
-    peers: int = 100
+    peers: int = 3
 
     # The name of the experiment.
     name: str = ""
@@ -17,7 +17,7 @@ class SimulationSettings:
     identifier: Optional[str] = None
 
     # The duration of the simulation in seconds.
-    duration: int = 120
+    duration: int = 10
 
     # The logging level during the experiment.
     logging_level: str = "INFO"
@@ -26,7 +26,7 @@ class SimulationSettings:
     enable_community_statistics: bool = False
 
     # Optional CSV file with a latency matrix (space-separated).
-    latencies_file: Optional[str] = None
+    latencies_file: Optional[str] = "data/latencies.txt"
 
     # The IPv8 ticker is responsible for community walking and discovering other peers, but can significantly limit
     # performance. Setting this option to False cancels the IPv8 ticker, improving performance.

@@ -3,12 +3,11 @@ from collections import Counter
 
 from pyipv8.ipv8.peer import Peer
 
-# Peer identifier size (in number of hexadecimal characters)
-PEER_ID_SIZE = 4
+from hidra.settings import HIDRASettings
 
 
 def get_peer_id(peer: Peer) -> str:
-    return hexlify(peer.mid).decode()[:PEER_ID_SIZE:]
+    return hexlify(peer.mid).decode()[:HIDRASettings.peer_id_size:]
 
 
 def select_own_solver(usages: dict) -> str:

@@ -1,27 +1,18 @@
-import time
-
 from pyipv8.ipv8.requestcache import NumberCache
 
 
-class HIDRAEventCache(NumberCache):
+class HIDRANumberCache(NumberCache):
     """
-    Cache for HIDRA events
+    Number cache for HIDRA objects identified by an ID
     """
 
-    def __init__(self,
-                 request_cache,
-                 prefix: str,
-                 event_id: int,
-                 applicant_peer_id: str,
-                 container_id: int,
-                 applicant_usage: int):
-        super().__init__(request_cache, prefix, event_id)
+    def __init__(self, request_cache, prefix: str, object_id: int):
+        super().__init__(request_cache, prefix, object_id)
 
-        # Attributes
-        self.applicant = applicant_peer_id
-        self.start_time = time.time_ns()
-        self.container_id = container_id
-        self.usages = {applicant_peer_id: applicant_usage}
-        self.votes = {}
-        self.solver = None
-        self.end_time = None
+    @property
+    def timeout_delay(self):
+        return 30
+
+    def on_timeout(self):
+        # print("Timeout for \"" + self.prefix + "\":", str(self.number))
+        pass
