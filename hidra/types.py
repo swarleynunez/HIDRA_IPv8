@@ -36,8 +36,6 @@ class HIDRAContainer:
         self.image_tag = image_tag
         # self.required_usage = required_usage
         self.host = None
-        # Testing
-        self.migrated = False
 
 
 class IPv8PendingMessage:

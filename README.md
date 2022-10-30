@@ -1,1 +1,1 @@
-# HIDRA project
+# HIDRA IPv8 project

@@ -48,7 +48,10 @@ class HIDRACommunity(Community):
         self.er_msg_count = 0
         self.vs_msg_count = 0
         self.es_msg_count = 0
+
+        # Experiments
         self.free_rider = None
+        self.ex1_containers = []
 
         # Set the initial peer state
         self.initialize_peer()
@@ -63,7 +66,7 @@ class HIDRACommunity(Community):
         # Register an asyncio task with the community
         # This ensures that the task ends when the community is unloaded
         self.register_task("send_peer_offer", self.send_peer_offer, delay=1)
-        self.register_task("send_new_event", self.send_new_event, delay=3, interval=1)
+        self.register_task("send_new_event", self.send_new_event, interval=1)
 
     async def unload(self) -> None:
         await self.request_cache.shutdown()
@@ -136,6 +139,9 @@ class HIDRACommunity(Community):
             self.containers[container_id] = HIDRAContainer(random.choice(image_tags))
             self.containers[container_id].host = get_peer_id(self.my_peer)
 
+        # Experiments
+        self.ex1_containers.append(HIDRASettings.initial_container_count)
+
     ############
     # Messages #
     ############
@@ -183,8 +189,6 @@ class HIDRACommunity(Community):
         # Requirements
         if self.exist_event(payload.event_id):
             sys.exit("Repeated EID between peers. Exiting...")
-        if self.exist_container(payload.container_id):
-            sys.exit("Repeated CID between peers. Exiting...")
 
         # Debug
         self.ne_msg_count += 1
@@ -204,7 +208,8 @@ class HIDRACommunity(Community):
         # Update storage and cache
         event = self.events[payload.event_id] = HIDRAEvent(sender, payload.container_id, payload.usage)
         event.usages[get_peer_id(self.my_peer)] = my_usage
-        self.containers[payload.container_id] = HIDRAContainer(payload.container_image_tag)
+        if not self.exist_container(payload.container_id):
+            self.containers[payload.container_id] = HIDRAContainer(payload.container_image_tag)
         self.request_cache.add(HIDRANumberCache(self.request_cache, EVENT_PREFIX, payload.event_id))
 
         # Send a EventReply message to each peer
@@ -261,7 +266,7 @@ class HIDRACommunity(Community):
         # Debug
         self.vs_msg_count += 1
         # print("[" + get_peer_id(self.my_peer) + "] VoteSolver received ---> EID=" + str(payload.event_id) +
-        # ", From=" + sender + ", Solver=" + payload.solver)
+        #     ", From=" + sender + ", Solver=" + payload.solver)
 
         # Update storage
         event = self.events[payload.event_id]
@@ -291,8 +296,12 @@ class HIDRACommunity(Community):
             else:
                 self.containers[event.container_id].host = get_peer_id(self.my_peer)
 
-            # Testing
-            self.containers[event.container_id].migrated = True
+            # Experiments
+            container_count = 0
+            for _, v in self.containers.items():
+                if v.host == get_peer_id(self.my_peer):
+                    container_count += 1
+            self.ex1_containers.append(container_count)
 
             # Send a EventSolved message to each peer
             for peer in self.get_peers():
@@ -315,7 +324,7 @@ class HIDRACommunity(Community):
         # Debug
         self.es_msg_count += 1
         # print("[" + get_peer_id(self.my_peer) + "] EventSolved received ---> EID=" + str(payload.event_id) +
-        # ", From=" + sender)
+        #     ", From=" + sender)
 
         # Update storage and cache
         event = self.events[payload.event_id]
@@ -328,8 +337,12 @@ class HIDRACommunity(Community):
         if event.applicant == get_peer_id(self.my_peer):
             self.request_cache.pop(CONTAINER_PREFIX, event.container_id)
 
-        # Testing
-        self.containers[event.container_id].migrated = True
+        # Experiments
+        container_count = 0
+        for _, v in self.containers.items():
+            if v.host == get_peer_id(self.my_peer):
+                container_count += 1
+        self.ex1_containers.append(container_count)
 
     def add_pending_message(self, sender, payload) -> None:
         while True:
@@ -361,13 +374,16 @@ class HIDRACommunity(Community):
     # Containers #
     ##############
     def select_container(self) -> int:
-        # Selecting the first container not used by an event
+        # Selecting a random own container not used by an event
+        selectable = []
         for k, v in self.containers.items():
-            if v.host == get_peer_id(self.my_peer) \
-                    and not v.migrated \
-                    and not self.request_cache.has(CONTAINER_PREFIX, k):
-                self.request_cache.add(HIDRANumberCache(self.request_cache, CONTAINER_PREFIX, k))
-                return k
+            if v.host == get_peer_id(self.my_peer) and not self.request_cache.has(CONTAINER_PREFIX, k):
+                selectable.append(k)
+
+        if len(selectable) > 0:
+            container_id = random.choice(selectable)
+            self.request_cache.add(HIDRANumberCache(self.request_cache, CONTAINER_PREFIX, container_id))
+            return container_id
 
     ###########
     # Getters #

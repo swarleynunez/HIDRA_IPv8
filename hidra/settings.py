@@ -7,7 +7,7 @@ class HIDRASettings:
     peer_id_size: int = 4
 
     # HIDRA objects identifier size (maximum digits)
-    object_id_size: int = 4
+    object_id_size: int = 5
 
     # HIDRA resource usage size (maximum digits)
     usage_size: int = 5

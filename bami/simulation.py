@@ -8,6 +8,8 @@ from asyncio import sleep
 from typing import Optional
 
 import yappi
+from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 from hidra.community import HIDRACommunity
 from pyipv8.ipv8.messaging.interfaces.statistics_endpoint import StatisticsEndpoint
@@ -111,7 +113,7 @@ class BamiSimulation(TaskManager):
 
         await sleep(5)  # Make sure peers have time to discover each other
 
-        # print("IPv8 peer discovery complete")
+        print("IPv8 peer discovery complete")
 
     def apply_latencies(self):
         """
@@ -125,7 +127,7 @@ class BamiSimulation(TaskManager):
             for line in latencies_file.readlines():
                 latencies.append([float(l) for l in line.strip().split(",")])
 
-        # print("Read latency matrix with %d sites!" % len(latencies))
+        print("Read latency matrix with %d sites!" % len(latencies))
 
         # Assign nodes to sites in a round-robin fashion and apply latencies accordingly
         for from_ind, from_node in enumerate(self.nodes):
@@ -135,17 +137,17 @@ class BamiSimulation(TaskManager):
                 latency_ms = int(latencies[from_site_ind][to_site_ind]) / 1000
                 from_node.endpoint.latencies[to_node.endpoint.wan_address] = latency_ms
 
-        # print("Latencies applied!")
+        print("Latencies applied!")
 
     async def start_simulation(self) -> None:
-        # print("Starting simulation with %d peers..." % self.settings.peers)
+        print("Starting simulation with %d peers..." % self.settings.peers)
 
         if self.settings.profile:
             yappi.start(builtins=True)
 
         start_time = time.time()
         await asyncio.sleep(self.settings.duration)
-        # print("Simulation took %f seconds" % (time.time() - start_time))
+        print("Simulation took %f seconds" % (time.time() - start_time))
 
         if self.settings.profile:
             yappi.stop()
@@ -165,7 +167,9 @@ class BamiSimulation(TaskManager):
         """
         This method is called when the simulations are finished.
         """
-        pass
+
+        # HIDRA
+        self.print_final_statistics()
 
     async def run(self) -> None:
         self.setup_directories()
@@ -174,12 +178,10 @@ class BamiSimulation(TaskManager):
         await self.ipv8_discover_peers()
         self.apply_latencies()
         await self.on_ipv8_ready()
-        # print("Simulation setup took %f seconds" % (time.time() - start_time))
+        print("Simulation setup took %f seconds" % (time.time() - start_time))
         await self.start_simulation()
         self.on_simulation_finished()
 
-        # HIDRA
-        self.print_final_statistics()
         await sleep(5)  # To avoid asyncio errors
 
     #########
@@ -190,11 +192,11 @@ class BamiSimulation(TaskManager):
         self.print_events()
         self.print_containers()
         self.print_messages()
-        if HIDRASettings.enable_free_riding:
+        if HIDRASettings.enable_free_rider:
             self.print_experiments()
 
     def print_peers(self):
-        print("-------------------- Peers --------------------")
+        print("\n-------------------- Peers --------------------")
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
             print("[" + peer_id + "]", "offers", str(peer.overlay.peers[peer_id].max_usage))
@@ -205,6 +207,18 @@ class BamiSimulation(TaskManager):
             peer_id = get_peer_id(peer.overlay.my_peer)
             print("[" + peer_id + "]", len(peer.overlay.events), "events:")
             for k, v in peer.overlay.events.items():
+                # Dismiss unfinished events due to the end of the simulation
+                if len(peer.overlay.messages) == 0 and not v.solver:
+                    if v.applicant == peer_id:
+                        peer.overlay.e_count -= 1
+                        if len(v.usages) > 1:
+                            peer.overlay.er_msg_count -= len(v.usages) - 1
+                    else:
+                        peer.overlay.ne_msg_count -= 1
+                    if len(v.votes) > 1:
+                        peer.overlay.vs_msg_count -= len(v.votes) - 1
+                    continue
+
                 print(" - EID=" + str(k), v.applicant, v.start_time, v.container_id, v.usages, v.votes, v.solver,
                       v.end_time)
 
@@ -242,3 +256,29 @@ class BamiSimulation(TaskManager):
     def print_experiments(self):
         print("\n----------------- Experiments -----------------")
         print("😈 [" + str(self.nodes[0].overlay.free_rider) + "] 😈")
+
+        ################
+        # Experiment 1 #
+        ################
+        # Data
+        first_honest = True
+        fig, ax = plt.subplots()
+        for peer in self.nodes:
+            if get_peer_id(peer.overlay.my_peer) == peer.overlay.free_rider:
+                ax.plot(peer.overlay.ex1_containers, color="red", label="Free-rider peer", linewidth=2)
+            else:
+                if first_honest:
+                    first_honest = False
+                    ax.plot(peer.overlay.ex1_containers, color="green", label="Honest peers")
+                else:
+                    ax.plot(peer.overlay.ex1_containers, color="green")
+
+        # Style
+        ax.set_xlabel('Number of orchestration events', fontweight="bold")
+        ax.set_ylabel('Number of containers', fontweight="bold")
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        ax.legend(loc="upper center", bbox_to_anchor=(0, 1, 1, 0.12), ncol=2)
+
+        # Get plot
+        plt.grid(True, alpha=0.5)
+        plt.show()

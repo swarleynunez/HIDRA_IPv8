@@ -14,10 +14,12 @@ def select_own_solver(usages: dict) -> str:
     minor_usage = float('inf')
     solver = ""
 
-    # Iterate over all EventReply/usages
+    # Iterate over all EventReply/usages (ties depend on peer IDs)
     for k, v in usages.items():
         if v < minor_usage:
             minor_usage = v
+            solver = k
+        elif v == minor_usage and k < solver:
             solver = k
 
     return solver
