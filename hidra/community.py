@@ -1,22 +1,27 @@
 import random
-import sys
 import time
 from binascii import unhexlify
 
 from hidra.caches import HIDRANumberCache
-from hidra.payload import NewEventPayload, EventReplyPayload, VoteSolverPayload, EventSolvedPayload, \
-    EVENT_REPLY_MESSAGE, VOTE_SOLVER_MESSAGE, EVENT_SOLVER_MESSAGE, PeerOfferPayload
+from hidra.payload import PeerInitPayload, NewEventPayload, EventReplyPayload, EventCommitPayload, EventCreditPayload, \
+    EventDiscoveryPayload, PEER_INIT_MESSAGE, NEW_EVENT_MESSAGE, EVENT_REPLY_MESSAGE, EVENT_COMMIT_MESSAGE, \
+    EVENT_CREDIT_MESSAGE, EVENT_DISCOVERY_MESSAGE
 from hidra.settings import HIDRASettings
 from hidra.types import HIDRAEvent, IPv8PendingMessage, HIDRAPeer, HIDRAContainer
-from hidra.utils import get_peer_id, select_own_solver, get_event_solver
+from hidra.utils import get_peer_id, get_event_solver, get_object_id, sign_data, verify_sign, select_own_solver
 from pyipv8.ipv8.community import Community
+from pyipv8.ipv8.keyvault.crypto import default_eccrypto
 from pyipv8.ipv8.lazy_community import lazy_wrapper
+from pyipv8.ipv8.peer import Peer
 from pyipv8.ipv8.requestcache import RequestCache
 
 # Cache prefixes
 EVENT_PREFIX = "HIDRA_events"
 CONTAINER_PREFIX = "HIDRA_containers"
 MESSAGES_PREFIX = "IPv8_messages"
+
+# Global variables
+CONTAINER_IMAGE_TAGS = ["nginx", "postgres", "hello-world", "busybox", "ubuntu"]
 
 # Experiments
 FREE_RIDER = None
@@ -37,17 +42,21 @@ class HIDRACommunity(Community):
         self.events = {}
         self.containers = {}
         self.messages = {}
+        self.event_sn = 0  # Sequence number
+        self.container_sn = 0  # Sequence number
+        self.message_sn = 0  # Sequence number
 
         # Overlay/community/cluster cache
         self.request_cache = RequestCache()
 
         # Testing
-        self.po_msg_count = 0
+        self.pi_msg_count = 0
         self.e_count = 0
         self.ne_msg_count = 0
         self.er_msg_count = 0
-        self.vs_msg_count = 0
-        self.es_msg_count = 0
+        self.eco_msg_count = 0
+        self.ecr_msg_count = 0
+        self.ed_msg_count = 0
 
         # Experiments
         self.free_rider = None
@@ -57,33 +66,111 @@ class HIDRACommunity(Community):
         self.initialize_peer()
 
         # Message handlers
-        self.add_message_handler(1, self.on_peer_offer)
-        self.add_message_handler(2, self.on_new_event)
-        self.add_message_handler(3, self.on_event_reply)
-        self.add_message_handler(4, self.on_vote_solver)
-        self.add_message_handler(5, self.on_solve_event)
+        self.add_message_handler(PEER_INIT_MESSAGE, self.on_peer_init)
+        self.add_message_handler(NEW_EVENT_MESSAGE, self.on_new_event)
+        self.add_message_handler(EVENT_REPLY_MESSAGE, self.on_event_reply)
+        self.add_message_handler(EVENT_COMMIT_MESSAGE, self.on_event_commit)
+        self.add_message_handler(EVENT_CREDIT_MESSAGE, self.on_event_credit)
+        self.add_message_handler(EVENT_DISCOVERY_MESSAGE, self.on_event_discovery)
 
         # Register an asyncio task with the community
         # This ensures that the task ends when the community is unloaded
         self.register_task("send_peer_offer", self.send_peer_offer, delay=1)
-        self.register_task("send_new_event", self.send_new_event, interval=1)
+        self.register_task("send_new_event", self.send_new_event, delay=5, interval=1)
+
+    ########
+    # Peer #
+    ########
+    def initialize_peer(self) -> None:
+        # Update storage
+        public_key = self.my_peer.public_key
+        max_usage = random.randint(10 ** (HIDRASettings.usage_size - 1), 10 ** HIDRASettings.usage_size)
+        self.peers[get_peer_id(self.my_peer)] = HIDRAPeer(public_key, max_usage)
+
+        # Any initial container to deploy?
+        self.initialize_containers()
+
+        # Experiments
+        self.set_free_rider()
+
+    def initialize_containers(self) -> None:
+        my_peer_id = get_peer_id(self.my_peer)
+
+        for _ in range(HIDRASettings.initial_containers):
+            # Get the next container ID
+            container_id = get_object_id(my_peer_id, self.container_sn)
+            self.container_sn += 1
+
+            # Update storage
+            self.containers[container_id] = HIDRAContainer(random.choice(CONTAINER_IMAGE_TAGS))
+            self.containers[container_id].host = my_peer_id
+
+        # Experiments
+        self.ex1_containers.append(HIDRASettings.initial_containers)
+
+    def get_fanout_peers(self, applicant_peer_id: str) -> [Peer]:
+        my_peer_id = get_peer_id(self.my_peer)
+
+        # Convert IPv8 peers to HIDRA peers
+        peer_ids = []
+        for peer in self.get_peers():
+            peer_ids.append(get_peer_id(peer))
+
+        # Select peers from the applicant perspective
+        if my_peer_id != applicant_peer_id:
+            peer_ids.remove(applicant_peer_id)
+            peer_ids.append(my_peer_id)
+
+        # Sort array of HIDRA peers
+        peer_ids.sort()
+
+        # Select a deterministic random peer fanout
+        if HIDRASettings.max_fanout <= len(self.get_peers()) + 1:
+            fanout = HIDRASettings.max_fanout
+        else:
+            fanout = len(self.get_peers()) + 1
+        random.seed(applicant_peer_id)
+        my_peer_ids = random.sample(peer_ids, k=fanout - 1)
+        random.seed()  # Default timestamp seed
+
+        # Select the applicant peer
+        if my_peer_id != applicant_peer_id:
+            my_peer_ids.append(applicant_peer_id)
+
+        # Convert HIDRA peers to IPv8 peers
+        my_peers = []
+        for peer in self.get_peers():
+            if get_peer_id(peer) in my_peer_ids:
+                my_peers.append(peer)
+
+        # Select myself
+        my_peers.append(self.my_peer)
+
+        return my_peers
+
+    def get_peer_from_id(self, peer_id) -> Peer:
+        if get_peer_id(self.my_peer) == peer_id:
+            return self.my_peer
+        else:
+            for peer in self.get_peers():
+                if get_peer_id(peer) == peer_id:
+                    return peer
 
     async def unload(self) -> None:
         await self.request_cache.shutdown()
         await super().unload()
 
-    ####################
-    # Message handlers #
-    ####################
-    @lazy_wrapper(PeerOfferPayload)
-    def on_peer_offer(self, peer, payload) -> None:
+    ############
+    # Messages #
+    ############
+    @lazy_wrapper(PeerInitPayload)
+    def on_peer_init(self, peer, payload) -> None:
         # Debug
-        self.po_msg_count += 1
+        self.pi_msg_count += 1
 
         # Update storage
-        peer_id = get_peer_id(peer)
-        if not self.exist_peer(peer_id):
-            self.peers[peer_id] = HIDRAPeer(payload.max_usage)
+        public_key = default_eccrypto.key_from_public_bin(payload.public_key)
+        self.peers[get_peer_id(peer)] = HIDRAPeer(public_key, payload.max_usage)
 
     @lazy_wrapper(NewEventPayload)
     def on_new_event(self, peer, payload) -> None:
@@ -94,264 +181,281 @@ class HIDRACommunity(Community):
         self.process_pending_messages()
         self.process_event_reply_message(get_peer_id(peer), payload)
 
-    @lazy_wrapper(VoteSolverPayload)
-    def on_vote_solver(self, peer, payload) -> None:
+    @lazy_wrapper(EventCommitPayload)
+    def on_event_commit(self, peer, payload) -> None:
         self.process_pending_messages()
-        self.process_vote_solver_message(get_peer_id(peer), payload)
+        self.process_event_commit_message(get_peer_id(peer), payload)
 
-    @lazy_wrapper(EventSolvedPayload)
-    def on_solve_event(self, peer, payload) -> None:
+    @lazy_wrapper(EventCreditPayload)
+    def on_event_credit(self, peer, payload) -> None:
         self.process_pending_messages()
-        self.process_event_solved_message(get_peer_id(peer), payload)
+        self.process_event_credit_message(get_peer_id(peer), payload)
 
-    ########
-    # Init #
-    ########
-    def initialize_peer(self):
-        self.set_peer_offer()
-        self.initialize_containers()
+    @lazy_wrapper(EventDiscoveryPayload)
+    def on_event_discovery(self, peer, payload) -> None:
+        self.process_event_discovery_message(get_peer_id(peer), payload)
 
-        # Experiments
-        self.set_free_rider()
-
-    def set_peer_offer(self) -> None:
-        """
-        Set the amount of resources that the peer offers to the cluster
-        """
-
-        # Payload data
-        peer_id = get_peer_id(self.my_peer)
-        max_usage = random.randint(10 ** (HIDRASettings.usage_size - 1), 10 ** HIDRASettings.usage_size)
-
-        # Update storage
-        self.peers[peer_id] = HIDRAPeer(max_usage)
-
-    def initialize_containers(self) -> None:
-        for _ in range(HIDRASettings.initial_container_count):
-            # Randomize container ID
-            while True:
-                container_id = random.randint(1, 10 ** HIDRASettings.object_id_size)
-                if not self.exist_container(container_id):
-                    break
-
-            # Update storage
-            image_tags = ["nginx", "postgres", "hello-world", "busybox", "ubuntu"]
-            self.containers[container_id] = HIDRAContainer(random.choice(image_tags))
-            self.containers[container_id].host = get_peer_id(self.my_peer)
-
-        # Experiments
-        self.ex1_containers.append(HIDRASettings.initial_container_count)
-
-    ############
-    # Messages #
-    ############
     def send_peer_offer(self) -> None:
-        # Payload data
-        peer_id = get_peer_id(self.my_peer)
-        max_usage = self.peers[peer_id].max_usage
+        my_peer_id = get_peer_id(self.my_peer)
 
-        # Send a PeerOffer message to each peer
+        # Payload data
+        bin_pk = default_eccrypto.key_to_bin(self.peers[my_peer_id].public_key)
+        max_usage = self.peers[my_peer_id].max_usage
+
+        # Send a PeerInit message to all peers
         for peer in self.get_peers():
-            self.ez_send(peer, PeerOfferPayload(peer_id, max_usage))
+            self.ez_send(peer, PeerInitPayload(bin_pk, max_usage))
 
     def send_new_event(self) -> None:
+        my_peer_id = get_peer_id(self.my_peer)
+
         # Payload data
-        while True:
-            event_id = random.randint(1, 10 ** HIDRASettings.object_id_size)
-            if not self.exist_event(event_id):
-                break
-        if FREE_RIDER == get_peer_id(self.my_peer):
-            my_usage = self.fake_usage()
-        else:
-            while True:
-                my_usage = random.randint(1, 10 ** (HIDRASettings.usage_size - 1))
-                if my_usage <= self.peers[get_peer_id(self.my_peer)].max_usage:
-                    break
-        container_id = self.select_container()
-        if not container_id:
+        # container_id = self.select_container()
+        # if not container_id:
+        #     return
+
+        # Get the next container ID
+        container_id = get_object_id(my_peer_id, self.container_sn)
+        self.container_sn += 1
+        image_tag = random.choice(CONTAINER_IMAGE_TAGS)
+
+        # Get the next event ID
+        event_id = get_object_id(my_peer_id, self.event_sn)
+        self.event_sn += 1
+
+        # Debug
+        # print("[" + my_peer_id + "] Sending event ---> EID=" + str(event_id) + ", CID=" + str(container_id))
+
+        # Send a NewEvent/PREPARE message to my peers
+        for peer in self.get_fanout_peers(my_peer_id):
+            self.ez_send(peer, NewEventPayload(event_id, container_id, image_tag))
+
+    def process_new_event_message(self, sender_id, payload) -> None:
+        # Requirements
+        if self.exist_event(payload.event_id):
+            # Dismissing the message...
             return
 
         # Debug
-        self.e_count += 1
-        # print("[" + get_peer_id(self.my_peer) + "] Sending event ---> EID=" + str(event_id) +
-        # ", CID=" + str(container_id) + ", Usage=" + str(my_usage))
-
-        # Update storage and cache
-        self.events[event_id] = HIDRAEvent(get_peer_id(self.my_peer), container_id, my_usage)
-        self.request_cache.add(HIDRANumberCache(self.request_cache, EVENT_PREFIX, event_id))
-
-        # Send a NewEvent message to each peer
-        for peer in self.get_peers():
-            image_tag = self.containers[container_id].image_tag
-            self.ez_send(peer, NewEventPayload(event_id, container_id, image_tag, my_usage))
-
-    def process_new_event_message(self, sender, payload) -> None:
-        # Requirements
-        if self.exist_event(payload.event_id):
-            sys.exit("Repeated EID between peers. Exiting...")
-
-        # Debug
         self.ne_msg_count += 1
-        # print("[" + get_peer_id(self.my_peer) + "] NewEvent received ---> EID=" + str(payload.event_id) +
-        # ", CID=" + str(payload.container_id) + ", Image=" + payload.container_image_tag +
-        # ", From=" + sender + ", Usage=" + str(payload.usage))
+        # print("[" + get_peer_id(self.my_peer) + "] NewEvent received ---> EID=" +
+        #       str(payload.event_id) + ", From=" + get_peer_id(sender))
 
         # Payload data
+        # Experiments
         if FREE_RIDER == get_peer_id(self.my_peer):
-            my_usage = self.fake_usage()
+            usage_offer = self.fake_usage_offer()
         else:
-            while True:
-                my_usage = random.randint(1, 10 ** (HIDRASettings.usage_size - 1))
-                if my_usage <= self.peers[get_peer_id(self.my_peer)].max_usage:
-                    break
+            usage_offer = random.randint(0, 10 ** (HIDRASettings.usage_size - 1))
+
+        # TODO: reputation burning
+        reputation_offer = 0
 
         # Update storage and cache
-        event = self.events[payload.event_id] = HIDRAEvent(sender, payload.container_id, payload.usage)
-        event.usages[get_peer_id(self.my_peer)] = my_usage
+        self.events[payload.event_id] = HIDRAEvent(sender_id, payload.container_id)
         if not self.exist_container(payload.container_id):
             self.containers[payload.container_id] = HIDRAContainer(payload.container_image_tag)
         self.request_cache.add(HIDRANumberCache(self.request_cache, EVENT_PREFIX, payload.event_id))
 
-        # Send a EventReply message to each peer
-        for peer in self.get_peers():
-            self.ez_send(peer, EventReplyPayload(payload.event_id, my_usage))
+        # Format and sign event data
+        data = str(payload.event_id) + "," + \
+               str(usage_offer) + "," + \
+               str(reputation_offer)
+        signature = sign_data(self.my_peer.key, data)
 
-    def process_event_reply_message(self, sender, payload) -> None:
+        # Send an EventReply/ACK message to the applicant peer
+        self.ez_send(self.get_peer_from_id(sender_id),
+                     EventReplyPayload(payload.event_id, usage_offer, reputation_offer, signature))
+
+    # Executed by applicant peers
+    def process_event_reply_message(self, sender_id, payload) -> None:
         # Requirements
         if not self.exist_event(payload.event_id):
-            self.add_pending_message(sender, payload)
+            self.add_pending_message(sender_id, payload)
             return
-        if self.has_already_replied(payload.event_id, sender):
+        event = self.events[payload.event_id]
+        if len(event.ack_signatures) == self.get_required_replies():
             # Dismissing the message...
             return
-        if self.has_required_replies(payload.event_id):
+        # Verify NewEvent/PREPARE payload signature
+        data = str(payload.event_id) + "," + \
+               str(payload.usage_offer) + "," + \
+               str(payload.reputation_offer)
+        if not verify_sign(self.peers[sender_id].public_key, data, payload.signature):
             # Dismissing the message...
             return
 
         # Debug
         self.er_msg_count += 1
-        # print("[" + get_peer_id(self.my_peer) + "] EventReply received ---> EID=" + str(payload.event_id) +
-        # ", From=" + sender + ", Usage=" + str(payload.usage))
+        # print("[" + get_peer_id(self.my_peer) + "] EventReply received ---> EID=" +
+        #       str(payload.event_id) + ", From=" + sender_id)
 
         # Update storage
-        event = self.events[payload.event_id]
-        event.usages[sender] = payload.usage
+        event.usage_offers[sender_id] = payload.usage_offer
+        event.reputation_offers[sender_id] = payload.reputation_offer
+        event.ack_signatures[sender_id] = str(payload.signature, "latin1")  # Due to JSON bytes serialization
 
-        # Check the number of EventReply/usages received
-        if self.has_required_replies(payload.event_id):
-            # Select my own best solver
-            solver = select_own_solver(event.usages)
+        # Send all EventReply/ACKs to my peers (COMMIT message)
+        if len(event.ack_signatures) == self.get_required_replies():
+            for peer in self.get_fanout_peers(event.applicant):
+                self.ez_send(peer, EventCommitPayload(payload.event_id,
+                                                      event.usage_offers,
+                                                      event.reputation_offers,
+                                                      event.ack_signatures))
 
-            # Update storage
-            event.votes[get_peer_id(self.my_peer)] = solver
-
-            # Send a VoteSolver message to each peer
-            for peer in self.get_peers():
-                self.ez_send(peer, VoteSolverPayload(payload.event_id, solver))
-
-    def process_vote_solver_message(self, sender, payload) -> None:
+    def process_event_commit_message(self, sender_id, payload) -> None:
         # Requirements
-        if not (self.exist_event(payload.event_id) and
-                self.has_already_replied(payload.event_id, sender) and
-                self.has_required_replies(payload.event_id)):
-            self.add_pending_message(sender, payload)
+        if not self.exist_event(payload.event_id):
+            self.add_pending_message(sender_id, payload)
             return
-        if self.has_already_voted(payload.event_id, sender):
+        if len(payload.ack_signatures) != self.get_required_replies():
             # Dismissing the message...
             return
-        if self.has_required_votes(payload.event_id):
+        # Verify NewEvent/PREPARE payload signatures
+        event = self.events[payload.event_id]
+        for k, v in payload.ack_signatures.items():
+            data = str(payload.event_id) + "," + \
+                   str(payload.usage_offers[k]) + "," + \
+                   str(payload.reputation_offers[k])
+            if not verify_sign(self.peers[k].public_key, data, bytes(v, "latin1")):
+                # Dismissing the message...
+                return
+
+        # Debug
+        self.eco_msg_count += 1
+        # print("[" + get_peer_id(self.my_peer) + "] EventCommit received ---> EID=" +
+        #       str(payload.event_id) + ", From=" + get_peer_id(sender))
+
+        # Update storage
+        event.usage_offers = payload.usage_offers
+        event.reputation_offers = payload.reputation_offers
+        event.ack_signatures = payload.ack_signatures
+
+        # Select the event solver
+        solver = select_own_solver(event.usage_offers, event.reputation_offers)
+
+        # TODO: settle reputations
+        self.peers[solver].reputation -= event.reputation_offers[solver]
+        # ...
+        # And for the other event peers?
+
+        # Am I the event solver?
+        execution_result = 0
+        if solver == get_peer_id(self.my_peer):
+            # Execute container synchronously
+            execution_result = self.execute_container(event.container_id)
+
+        # Format and sign approval data
+        data = str(payload.event_id) + "," + \
+               solver + "," + \
+               str(execution_result)
+        signature = sign_data(self.my_peer.key, data)
+
+        # Send an EventCredit/CREDIT message to the applicant peer
+        self.ez_send(self.get_peer_from_id(sender_id),
+                     EventCreditPayload(payload.event_id, solver, execution_result, signature))
+
+    # Executed by applicant peers
+    def process_event_credit_message(self, sender_id, payload) -> None:
+        # Requirements
+        if not self.exist_event(payload.event_id):
+            self.add_pending_message(sender_id, payload)
+            return
+        event = self.events[payload.event_id]
+        solver = get_event_solver(event.votes, self.get_required_votes())
+        if solver and self.has_already_voted(payload.event_id, solver):
+            # Dismissing the message...
+            return
+        # Verify EventCredit/CREDIT payload signature
+        data = str(payload.event_id) + "," + \
+               payload.solver + "," + \
+               str(payload.execution_result)
+        if not verify_sign(self.peers[sender_id].public_key, data, payload.signature):
             # Dismissing the message...
             return
 
         # Debug
-        self.vs_msg_count += 1
-        # print("[" + get_peer_id(self.my_peer) + "] VoteSolver received ---> EID=" + str(payload.event_id) +
-        #     ", From=" + sender + ", Solver=" + payload.solver)
+        self.ecr_msg_count += 1
+        # print("[" + get_peer_id(self.my_peer) + "] EventCredit received ---> EID=" +
+        #       str(payload.event_id) + ", From=" + sender_id)
 
         # Update storage
-        event = self.events[payload.event_id]
-        event.votes[sender] = payload.solver
+        event.votes[sender_id] = payload.solver
+        event.credit_signatures[sender_id] = str(payload.signature, "latin1")  # Due to JSON bytes serialization
+        event.execution_results[sender_id] = payload.execution_result
 
-        # Get the elected event solver (if any)
+        # Waiting for the solver and f + 1 EventCredit/CREDIT messages (final certificate)
         solver = get_event_solver(event.votes, self.get_required_votes())
-
-        # Am I the elected solver?
-        if solver == get_peer_id(self.my_peer):
+        if solver and self.has_already_voted(payload.event_id, solver):
             # Debug
-            # print("[" + get_peer_id(self.my_peer) + "] Executing event tasks ---> EID=" + str(payload.event_id) +
-            # ", CID=" + str(event.container_id))
-
-            # Executing event tasks
-            # ...
-            # DONE!
+            self.e_count += 1
+            # print("[" + get_peer_id(self.my_peer) + "] Executed container ---> CID=" +
+            #       str(event.container_id), str(event.execution_results[solver]))
 
             # Update storage and cache
-            event.solver = solver
             event.end_time = time.time_ns()
+            self.containers[event.container_id].host = solver
             self.request_cache.pop(EVENT_PREFIX, payload.event_id)
-
-            # Am I the event applicant?
-            if event.applicant == get_peer_id(self.my_peer):
+            if self.request_cache.has(CONTAINER_PREFIX, event.container_id):
                 self.request_cache.pop(CONTAINER_PREFIX, event.container_id)
-            else:
-                self.containers[event.container_id].host = get_peer_id(self.my_peer)
 
-            # Experiments
-            container_count = 0
-            for _, v in self.containers.items():
-                if v.host == get_peer_id(self.my_peer):
-                    container_count += 1
-            self.ex1_containers.append(container_count)
+            # Optional. Send the whole event to other peers
+            # Sending the event only to my fanout
+            # for peer in self.get_fanout_peers(event.applicant):
+            #    self.ez_send(peer, EventDiscoveryPayload(payload.event_id, event))
 
-            # Send a EventSolved message to each peer
-            for peer in self.get_peers():
-                self.ez_send(peer, EventSolvedPayload(payload.event_id))
-
-    def process_event_solved_message(self, sender, payload) -> None:
+    def process_event_discovery_message(self, sender_id, payload) -> None:
         # Requirements
-        if not (self.exist_event(payload.event_id) or
-                self.has_already_replied(payload.event_id, sender) or
-                self.has_required_replies(payload.event_id) or
-                self.has_already_voted(payload.event_id, sender) or
-                self.has_required_votes(payload.event_id) or
-                self.can_solve_event(payload.event_id, sender)):
-            self.add_pending_message(sender, payload)
-            return
-        if self.is_event_solved(payload.event_id):
+        if len(payload.event["ack_signatures"]) != self.get_required_replies():
             # Dismissing the message...
             return
+        # Verify NewEvent/PREPARE payload signatures
+        for k, v in payload.event["ack_signatures"].items():
+            data = str(payload.event_id) + "," + \
+                   str(payload.event["usage_offers"][k]) + "," + \
+                   str(payload.event["reputation_offers"][k])
+            if not verify_sign(self.peers[k].public_key, data, bytes(v, "latin1")):
+                # Dismissing the message...
+                return
+        if not get_event_solver(payload.event["votes"], self.get_required_votes()):
+            # Dismissing the message...
+            return
+        # Verify EventCredit/CREDIT payload signatures
+        for k, v in payload.event["credit_signatures"].items():
+            data = str(payload.event_id) + "," + \
+                   payload.event["votes"][k] + "," + \
+                   str(payload.event["execution_results"][k])
+            if not verify_sign(self.peers[k].public_key, data, bytes(v, "latin1")):
+                # Dismissing the message...
+                return
 
         # Debug
-        self.es_msg_count += 1
-        # print("[" + get_peer_id(self.my_peer) + "] EventSolved received ---> EID=" + str(payload.event_id) +
-        #     ", From=" + sender)
+        self.ed_msg_count += 1
+        # print("[" + get_peer_id(self.my_peer) + "] EventDelivery received ---> EID=" +
+        #       str(payload.event_id) + ", From=" + sender_id)
 
         # Update storage and cache
-        event = self.events[payload.event_id]
-        event.solver = sender
-        event.end_time = time.time_ns()
-        self.containers[event.container_id].host = sender
-        self.request_cache.pop(EVENT_PREFIX, payload.event_id)
+        if self.exist_event(payload.event_id):
+            if get_peer_id(self.my_peer) != sender_id:
+                event = self.events[payload.event_id]
+                event.votes = payload.event["votes"]
+                event.credit_signatures = payload.event["credit_signatures"]
+                event.execution_results = payload.event["execution_results"]
+                event.end_time = payload.event["end_time"]
+                self.containers[event.container_id].host = get_event_solver(event.votes, self.get_required_votes())
+                self.request_cache.pop(EVENT_PREFIX, payload.event_id)
+                if self.request_cache.has(CONTAINER_PREFIX, event.container_id):
+                    self.request_cache.pop(CONTAINER_PREFIX, event.container_id)
+        else:
+            pass
 
-        # Am I the event applicant?
-        if event.applicant == get_peer_id(self.my_peer):
-            self.request_cache.pop(CONTAINER_PREFIX, event.container_id)
-
-        # Experiments
-        container_count = 0
-        for _, v in self.containers.items():
-            if v.host == get_peer_id(self.my_peer):
-                container_count += 1
-        self.ex1_containers.append(container_count)
-
-    def add_pending_message(self, sender, payload) -> None:
-        while True:
-            message_id = random.randint(1, 10 ** HIDRASettings.object_id_size)
-            if not self.exist_message(message_id):
-                break
+    def add_pending_message(self, sender_id, payload) -> None:
+        # Get the next message ID
+        message_id = get_object_id(get_peer_id(self.my_peer), self.message_sn)
+        self.message_sn += 1
 
         # Update storage and cache
-        self.messages[message_id] = IPv8PendingMessage(sender, payload)
+        self.messages[message_id] = IPv8PendingMessage(sender_id, payload)
         self.request_cache.add(HIDRANumberCache(self.request_cache, MESSAGES_PREFIX, message_id))
 
     def process_pending_messages(self):
@@ -363,12 +467,31 @@ class HIDRACommunity(Community):
             if v.payload.msg_id == EVENT_REPLY_MESSAGE:
                 # Process pending 'EventReply' message
                 self.process_event_reply_message(v.sender, v.payload)
-            elif v.payload.msg_id == VOTE_SOLVER_MESSAGE:
-                # Process pending 'VoteSolver' message
-                self.process_vote_solver_message(v.sender, v.payload)
-            elif v.payload.msg_id == EVENT_SOLVER_MESSAGE:
-                # Process pending 'EventSolved' message
-                self.process_event_solved_message(v.sender, v.payload)
+            elif v.payload.msg_id == EVENT_COMMIT_MESSAGE:
+                # Process pending 'EventCommit' message
+                self.process_event_commit_message(v.sender, v.payload)
+            elif v.payload.msg_id == EVENT_CREDIT_MESSAGE:
+                # Process pending 'EventCommit' message
+                self.process_event_credit_message(v.sender, v.payload)
+
+    ##########
+    # Events #
+    ##########
+    @staticmethod
+    def get_required_replies() -> int:
+        """
+        Number of required replies/ACKs in events
+        """
+
+        return 2 * HIDRASettings.faulty_peers + 1
+
+    @staticmethod
+    def get_required_votes() -> int:
+        """
+        Number of required votes/CREDITs in events
+        """
+
+        return HIDRASettings.faulty_peers + 1
 
     ##############
     # Containers #
@@ -385,55 +508,23 @@ class HIDRACommunity(Community):
             self.request_cache.add(HIDRANumberCache(self.request_cache, CONTAINER_PREFIX, container_id))
             return container_id
 
-    ###########
-    # Getters #
-    ###########
-    def get_required_replies(self) -> int:
-        """
-        Number of required replies before selecting a solver
-        """
-
-        return len(self.get_peers()) + 1
-
-    def get_required_votes(self) -> int:
-        """
-        Number of required votes to establish the solver
-        """
-
-        return len(self.get_peers()) + 1
+    @staticmethod
+    def execute_container(container_id) -> int:
+        # Debug
+        # print("[" + get_peer_id(self.my_peer) + "] Executing container ---> CID=" + str(container_id))
+        return container_id
 
     ############
     # Checkers #
     ############
-    def exist_peer(self, peer_id) -> bool:
-        return peer_id in self.peers
-
     def exist_event(self, event_id) -> bool:
         return event_id in self.events
-
-    def has_already_replied(self, event_id, peer_id) -> bool:
-        return peer_id in self.events[event_id].usages
-
-    def has_required_replies(self, event_id) -> bool:
-        return len(self.events[event_id].usages) == self.get_required_replies()
 
     def has_already_voted(self, event_id, peer_id) -> bool:
         return peer_id in self.events[event_id].votes
 
-    def has_required_votes(self, event_id) -> bool:
-        return len(self.events[event_id].votes) == self.get_required_votes()
-
-    def can_solve_event(self, event_id, peer_id) -> bool:
-        return peer_id == get_event_solver(self.events[event_id].votes, self.get_required_votes())
-
-    def is_event_solved(self, event_id) -> bool:
-        return True if self.events[event_id].solver else False
-
     def exist_container(self, container_id) -> bool:
         return container_id in self.containers
-
-    def exist_message(self, message_id) -> bool:
-        return message_id in self.messages
 
     ###############
     # Experiments #
@@ -447,13 +538,10 @@ class HIDRACommunity(Community):
         # Testing
         self.free_rider = FREE_RIDER
 
-    def fake_usage(self) -> int:
+    def fake_usage_offer(self) -> int:
         if HIDRASettings.free_riding_type == "over":
             return self.peers[get_peer_id(self.my_peer)].max_usage
         elif HIDRASettings.free_riding_type == "under":
-            return 1
+            return 0
         else:
-            while True:
-                my_usage = random.randint(1, 10 ** (HIDRASettings.usage_size - 1))
-                if my_usage <= self.peers[get_peer_id(self.my_peer)].max_usage:
-                    return my_usage
+            return random.randint(0, 10 ** (HIDRASettings.usage_size - 1))

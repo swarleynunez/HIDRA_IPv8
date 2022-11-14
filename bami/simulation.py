@@ -22,7 +22,7 @@ from pyipv8.simulation.simulation_endpoint import SimulationEndpoint
 
 from bami.settings import SimulationSettings
 from hidra.settings import HIDRASettings
-from hidra.utils import get_peer_id
+from hidra.utils import get_peer_id, get_event_solver
 
 
 class BamiSimulation(TaskManager):
@@ -196,62 +196,69 @@ class BamiSimulation(TaskManager):
             self.print_experiments()
 
     def print_peers(self):
-        print("\n-------------------- Peers --------------------")
+        print("\n-------------------- Peers ---------------------")
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
-            print("[" + peer_id + "]", "offers", str(peer.overlay.peers[peer_id].max_usage))
+            print("[" + peer_id + "]", "profile:")
+            print(" -", peer.overlay.peers[peer_id].public_key.key.pk.hex(),
+                  peer.overlay.peers[peer_id].max_usage,
+                  peer.overlay.peers[peer_id].reputation)
 
     def print_events(self):
         print("\n-------------------- Events --------------------")
+        faulty_peers = HIDRASettings.faulty_peers
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
-            print("[" + peer_id + "]", len(peer.overlay.events), "events:")
+            print("[" + peer_id + "] events:")
+            if peer.overlay.e_count == 0:
+                print(" - Empty")
+                continue
             for k, v in peer.overlay.events.items():
                 # Dismiss unfinished events due to the end of the simulation
-                if len(peer.overlay.messages) == 0 and not v.solver:
-                    if v.applicant == peer_id:
-                        peer.overlay.e_count -= 1
-                        if len(v.usages) > 1:
-                            peer.overlay.er_msg_count -= len(v.usages) - 1
-                    else:
-                        peer.overlay.ne_msg_count -= 1
-                    if len(v.votes) > 1:
-                        peer.overlay.vs_msg_count -= len(v.votes) - 1
+                if len(peer.overlay.messages) == 0 and len(v.ack_signatures) < 2 * faulty_peers + 1:
+                    peer.overlay.ne_msg_count -= 1
+                    peer.overlay.er_msg_count -= len(v.ack_signatures)
                     continue
-
-                print(" - EID=" + str(k), v.applicant, v.start_time, v.container_id, v.usages, v.votes, v.solver,
-                      v.end_time)
+                if v.applicant == peer_id:
+                    print(" - EID=" + str(k), v.start_time, v.container_id,
+                          get_event_solver(v.votes, faulty_peers + 1), v.end_time)
 
     def print_containers(self):
         print("\n------------------ Containers ------------------")
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
+            print("[" + peer_id + "] containers:")
             c_count = 0
             for k, v in peer.overlay.containers.items():
                 if v.host == peer_id:
                     c_count += 1
-            print("[" + peer_id + "]", c_count, "containers:")
-            for k, v in peer.overlay.containers.items():
-                if v.host == peer_id:
                     print(" - CID=" + str(k), v.image_tag)
+            if c_count == 0:
+                print(" - Empty")
 
     def print_messages(self):
         print("\n------------------- Messages -------------------")
-        po_count = e_count = ne_count = er_count = vs_count = es_count = 0
+        pi_count = e_count = ne_count = er_count = eco_count = esr_count = ed_count = 0
         peers_count = SimulationSettings.peers
+        fanout = HIDRASettings.max_fanout
+        if fanout > peers_count:
+            fanout = peers_count
+        faulty_peers = HIDRASettings.faulty_peers
         for peer in self.nodes:
-            po_count += peer.overlay.po_msg_count
+            pi_count += peer.overlay.pi_msg_count
             e_count += peer.overlay.e_count
             ne_count += peer.overlay.ne_msg_count
             er_count += peer.overlay.er_msg_count
-            vs_count += peer.overlay.vs_msg_count
-            es_count += peer.overlay.es_msg_count
-        print("HIDRA events:", e_count,
-              "\nPeerOffer:", po_count, "of", (peers_count * (peers_count - 1)),
-              "\nNewEvent:", ne_count, "of", (peers_count - 1) * e_count,
-              "\nEventReply:", er_count, "of", ((peers_count - 1) ** 2) * e_count,
-              "\nVoteSolver:", vs_count, "of", (peers_count * (peers_count - 1)) * e_count,
-              "\nEventSolved:", es_count, "of", (peers_count - 1) * e_count)
+            eco_count += peer.overlay.eco_msg_count
+            esr_count += peer.overlay.ecr_msg_count
+            ed_count += peer.overlay.ed_msg_count
+        print("HIDRA events sent:", e_count,
+              "\n - 'PeerInit' messages received:", pi_count, "of", (peers_count * (peers_count - 1)),
+              "\n - 'NewEvent' messages received:", ne_count, "of", fanout * e_count,
+              "\n - 'EventReply' messages received:", er_count, "of", (2 * faulty_peers + 1) * e_count,
+              "\n - 'EventCommit' messages received:", eco_count, "of", fanout * e_count,
+              "\n - 'EventCredit' messages received:", esr_count,
+              "\n - 'EventDelivery' messages received:", ed_count, "of", fanout * e_count)
 
     def print_experiments(self):
         print("\n----------------- Experiments -----------------")

@@ -5,7 +5,7 @@ from typing import Optional
 @dataclass
 class SimulationSettings:
     # Number of IPv8 peers.
-    peers: int = 3
+    peers: int = 100
 
     # The name of the experiment.
     name: str = ""
@@ -17,7 +17,7 @@ class SimulationSettings:
     identifier: Optional[str] = None
 
     # The duration of the simulation in seconds.
-    duration: int = 10
+    duration: int = 60
 
     # The logging level during the experiment.
     logging_level: str = "INFO"
