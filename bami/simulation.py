@@ -61,6 +61,7 @@ class BamiSimulation(TaskManager):
         for peer_id in range(1, self.settings.peers + 1):
             if peer_id % 100 == 0:
                 print("Created %d peers..." % peer_id)
+
             endpoint = SimulationEndpoint()
             config = self.get_ipv8_builder(peer_id)
             config.set_log_level(self.settings.logging_level)
@@ -199,17 +200,15 @@ class BamiSimulation(TaskManager):
         print("\n-------------------- Peers ---------------------")
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
-            print("[" + peer_id + "]", "profile:")
-            print(" -", peer.overlay.peers[peer_id].public_key.key.pk.hex(),
-                  peer.overlay.peers[peer_id].max_usage,
-                  peer.overlay.peers[peer_id].reputation)
+            print("[" + peer_id + "]:")
+            print(" - PubKey:", peer.overlay.my_peer.public_key.key.pk.hex())
 
     def print_events(self):
         print("\n-------------------- Events --------------------")
         faulty_peers = HIDRASettings.faulty_peers
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
-            print("[" + peer_id + "] events:")
+            print("[" + peer_id + "]:")
             if peer.overlay.e_count == 0:
                 print(" - Empty")
                 continue
@@ -227,7 +226,7 @@ class BamiSimulation(TaskManager):
         print("\n------------------ Containers ------------------")
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
-            print("[" + peer_id + "] containers:")
+            print("[" + peer_id + "]:")
             c_count = 0
             for k, v in peer.overlay.containers.items():
                 if v.host == peer_id:

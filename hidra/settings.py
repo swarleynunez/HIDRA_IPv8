@@ -5,24 +5,19 @@ from bami.settings import SimulationSettings
 
 @dataclass
 class HIDRASettings:
-    # HIDRA peer identifier size (in number of hexadecimal characters)
-    peer_id_size: int = 6
+    # Identifier size of HIDRA peers (in number of hexadecimal characters)
+    peer_id_size: int = 4
 
-    # HIDRA objects identifier size (in number of hexadecimal characters)
-    object_id_size: int = 6
+    # Identifier size of HIDRA objects (in number of hexadecimal characters)
+    object_id_size: int = 4
 
-    # HIDRA resource usage size (maximum digits)
-    usage_size: int = 6
+    # Initial balance per peer
+    initial_balance = 100
 
-    # Maximum number of peers in each HIDRA event
-    max_fanout = 15
+    # Initial resource offer per peer
+    initial_resource_offer = 10240
 
-    # Number of faulty peers in each HIDRA event
-    if max_fanout <= SimulationSettings.peers:
-        faulty_peers = max_fanout // 3
-    else:
-        faulty_peers = SimulationSettings.peers // 3
-
+    # TODO
     # Number of containers initially executed by each peer
     initial_containers: int = 0
 

@@ -3,8 +3,8 @@ import time
 from binascii import unhexlify
 
 from hidra.caches import HIDRANumberCache
-from hidra.payload import PeerInitPayload, NewEventPayload, EventReplyPayload, EventCommitPayload, EventCreditPayload, \
-    EventDiscoveryPayload, PEER_INIT_MESSAGE, NEW_EVENT_MESSAGE, EVENT_REPLY_MESSAGE, EVENT_COMMIT_MESSAGE, \
+from hidra.payload import NewEventPayload, EventReplyPayload, EventCommitPayload, EventCreditPayload, \
+    EventDiscoveryPayload, NEW_EVENT_MESSAGE, EVENT_REPLY_MESSAGE, EVENT_COMMIT_MESSAGE, \
     EVENT_CREDIT_MESSAGE, EVENT_DISCOVERY_MESSAGE
 from hidra.settings import HIDRASettings
 from hidra.types import HIDRAEvent, IPv8PendingMessage, HIDRAPeer, HIDRAContainer
@@ -23,9 +23,6 @@ MESSAGES_PREFIX = "IPv8_messages"
 # Global variables
 CONTAINER_IMAGE_TAGS = ["nginx", "postgres", "hello-world", "busybox", "ubuntu"]
 
-# Experiments
-FREE_RIDER = None
-
 
 class HIDRACommunity(Community):
     """
@@ -38,7 +35,9 @@ class HIDRACommunity(Community):
         super().__init__(my_peer, endpoint, network)
 
         # Attributes
-        self.peers = {}
+        self.domain_peers = []
+        self.peer_info = {}
+
         self.events = {}
         self.containers = {}
         self.messages = {}
@@ -58,70 +57,39 @@ class HIDRACommunity(Community):
         self.ecr_msg_count = 0
         self.ed_msg_count = 0
 
-        # Experiments
-        self.free_rider = None
-        self.ex1_containers = []
-
         # Set the initial peer state
         self.initialize_peer()
 
         # Message handlers
-        self.add_message_handler(PEER_INIT_MESSAGE, self.on_peer_init)
-        self.add_message_handler(NEW_EVENT_MESSAGE, self.on_new_event)
-        self.add_message_handler(EVENT_REPLY_MESSAGE, self.on_event_reply)
-        self.add_message_handler(EVENT_COMMIT_MESSAGE, self.on_event_commit)
-        self.add_message_handler(EVENT_CREDIT_MESSAGE, self.on_event_credit)
-        self.add_message_handler(EVENT_DISCOVERY_MESSAGE, self.on_event_discovery)
+        # self.add_message_handler(NEW_EVENT_MESSAGE, self.on_new_event)
+        # self.add_message_handler(EVENT_REPLY_MESSAGE, self.on_event_reply)
+        # self.add_message_handler(EVENT_COMMIT_MESSAGE, self.on_event_commit)
+        # self.add_message_handler(EVENT_CREDIT_MESSAGE, self.on_event_credit)
+        # self.add_message_handler(EVENT_DISCOVERY_MESSAGE, self.on_event_discovery)
 
         # Register an asyncio task with the community
         # This ensures that the task ends when the community is unloaded
-        self.register_task("send_peer_offer", self.send_peer_offer, delay=1)
-        self.register_task("send_new_event", self.send_new_event, delay=5, interval=1)
+        # self.register_task("send_new_event", self.send_new_event, delay=3, interval=1)
 
     ########
     # Peer #
     ########
     def initialize_peer(self) -> None:
+        #
+        self.get_domain_peers(get_peer_id(self.my_peer))
+
         # Update storage
-        public_key = self.my_peer.public_key
-        max_usage = random.randint(10 ** (HIDRASettings.usage_size - 1), 10 ** HIDRASettings.usage_size)
-        self.peers[get_peer_id(self.my_peer)] = HIDRAPeer(public_key, max_usage)
+        balance = HIDRASettings.initial_balance
+        resource_offer = HIDRASettings.initial_resource_offer
+        self.peer_info[get_peer_id(self.my_peer)] = HIDRAPeer(balance, resource_offer)
 
-        # Any initial container to deploy?
-        self.initialize_containers()
-
-        # Experiments
-        self.set_free_rider()
-
-    def initialize_containers(self) -> None:
-        my_peer_id = get_peer_id(self.my_peer)
-
-        for _ in range(HIDRASettings.initial_containers):
-            # Get the next container ID
-            container_id = get_object_id(my_peer_id, self.container_sn)
-            self.container_sn += 1
-
-            # Update storage
-            self.containers[container_id] = HIDRAContainer(random.choice(CONTAINER_IMAGE_TAGS))
-            self.containers[container_id].host = my_peer_id
-
-        # Experiments
-        self.ex1_containers.append(HIDRASettings.initial_containers)
-
-    def get_fanout_peers(self, applicant_peer_id: str) -> [Peer]:
-        my_peer_id = get_peer_id(self.my_peer)
-
-        # Convert IPv8 peers to HIDRA peers
+    def get_domain_peers(self, applicant_peer_id: str) -> [Peer]:
+        # Get HIDRA peer IDs from IPv8 peers
         peer_ids = []
         for peer in self.get_peers():
             peer_ids.append(get_peer_id(peer))
 
-        # Select peers from the applicant perspective
-        if my_peer_id != applicant_peer_id:
-            peer_ids.remove(applicant_peer_id)
-            peer_ids.append(my_peer_id)
-
-        # Sort array of HIDRA peers
+        # Sort array of HIDRA peer IDs
         peer_ids.sort()
 
         # Select a deterministic random peer fanout
@@ -129,24 +97,18 @@ class HIDRACommunity(Community):
             fanout = HIDRASettings.max_fanout
         else:
             fanout = len(self.get_peers()) + 1
+
         random.seed(applicant_peer_id)
-        my_peer_ids = random.sample(peer_ids, k=fanout - 1)
+        domain_peer_ids = random.sample(peer_ids, k=HIDRASettings.max_domain_peers)
         random.seed()  # Default timestamp seed
 
-        # Select the applicant peer
-        if my_peer_id != applicant_peer_id:
-            my_peer_ids.append(applicant_peer_id)
-
-        # Convert HIDRA peers to IPv8 peers
-        my_peers = []
+        # Convert HIDRA peer IDs to IPv8 peers
+        domain_peers = []
         for peer in self.get_peers():
-            if get_peer_id(peer) in my_peer_ids:
-                my_peers.append(peer)
+            if get_peer_id(peer) in domain_peer_ids:
+                domain_peers.append(peer)
 
-        # Select myself
-        my_peers.append(self.my_peer)
-
-        return my_peers
+        return domain_peers
 
     def get_peer_from_id(self, peer_id) -> Peer:
         if get_peer_id(self.my_peer) == peer_id:
@@ -163,15 +125,6 @@ class HIDRACommunity(Community):
     ############
     # Messages #
     ############
-    @lazy_wrapper(PeerInitPayload)
-    def on_peer_init(self, peer, payload) -> None:
-        # Debug
-        self.pi_msg_count += 1
-
-        # Update storage
-        public_key = default_eccrypto.key_from_public_bin(payload.public_key)
-        self.peers[get_peer_id(peer)] = HIDRAPeer(public_key, payload.max_usage)
-
     @lazy_wrapper(NewEventPayload)
     def on_new_event(self, peer, payload) -> None:
         self.process_new_event_message(get_peer_id(peer), payload)
@@ -194,17 +147,6 @@ class HIDRACommunity(Community):
     @lazy_wrapper(EventDiscoveryPayload)
     def on_event_discovery(self, peer, payload) -> None:
         self.process_event_discovery_message(get_peer_id(peer), payload)
-
-    def send_peer_offer(self) -> None:
-        my_peer_id = get_peer_id(self.my_peer)
-
-        # Payload data
-        bin_pk = default_eccrypto.key_to_bin(self.peers[my_peer_id].public_key)
-        max_usage = self.peers[my_peer_id].max_usage
-
-        # Send a PeerInit message to all peers
-        for peer in self.get_peers():
-            self.ez_send(peer, PeerInitPayload(bin_pk, max_usage))
 
     def send_new_event(self) -> None:
         my_peer_id = get_peer_id(self.my_peer)
@@ -242,14 +184,7 @@ class HIDRACommunity(Community):
         #       str(payload.event_id) + ", From=" + get_peer_id(sender))
 
         # Payload data
-        # Experiments
-        if FREE_RIDER == get_peer_id(self.my_peer):
-            usage_offer = self.fake_usage_offer()
-        else:
-            usage_offer = random.randint(0, 10 ** (HIDRASettings.usage_size - 1))
-
-        # TODO: reputation burning
-        reputation_offer = 0
+        usage_offer = random.randint(0, 10 ** (HIDRASettings.usage_size - 1))
 
         # Update storage and cache
         self.events[payload.event_id] = HIDRAEvent(sender_id, payload.container_id)
@@ -260,12 +195,12 @@ class HIDRACommunity(Community):
         # Format and sign event data
         data = str(payload.event_id) + "," + \
                str(usage_offer) + "," + \
-               str(reputation_offer)
+               str(usage_offer)
         signature = sign_data(self.my_peer.key, data)
 
         # Send an EventReply/ACK message to the applicant peer
         self.ez_send(self.get_peer_from_id(sender_id),
-                     EventReplyPayload(payload.event_id, usage_offer, reputation_offer, signature))
+                     EventReplyPayload(payload.event_id, usage_offer, usage_offer, signature))
 
     # Executed by applicant peers
     def process_event_reply_message(self, sender_id, payload) -> None:
@@ -525,23 +460,3 @@ class HIDRACommunity(Community):
 
     def exist_container(self, container_id) -> bool:
         return container_id in self.containers
-
-    ###############
-    # Experiments #
-    ###############
-    def set_free_rider(self) -> None:
-        # Choose the first peer as the free-rider
-        global FREE_RIDER
-        if HIDRASettings.enable_free_rider and not FREE_RIDER:
-            FREE_RIDER = get_peer_id(self.my_peer)
-
-        # Testing
-        self.free_rider = FREE_RIDER
-
-    def fake_usage_offer(self) -> int:
-        if HIDRASettings.free_riding_type == "over":
-            return self.peers[get_peer_id(self.my_peer)].max_usage
-        elif HIDRASettings.free_riding_type == "under":
-            return 0
-        else:
-            return random.randint(0, 10 ** (HIDRASettings.usage_size - 1))

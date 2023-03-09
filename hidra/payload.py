@@ -9,22 +9,11 @@ from hidra.types import HIDRAEvent
 dataclass = overwrite_dataclass(dataclass)
 
 # Identifiers
-PEER_INIT_MESSAGE = 1
-NEW_EVENT_MESSAGE = 2
-EVENT_REPLY_MESSAGE = 3
-EVENT_COMMIT_MESSAGE = 4
-EVENT_CREDIT_MESSAGE = 5
-EVENT_DISCOVERY_MESSAGE = 6
-
-
-@dataclass(msg_id=PEER_INIT_MESSAGE)
-class PeerInitPayload:
-    """
-    Payload for HIDRA's 'PeerInit' messages
-    """
-
-    public_key: bytes
-    max_usage: int
+NEW_EVENT_MESSAGE = 1
+EVENT_REPLY_MESSAGE = 2
+EVENT_COMMIT_MESSAGE = 3
+EVENT_CREDIT_MESSAGE = 4
+EVENT_DISCOVERY_MESSAGE = 5
 
 
 @dataclass(msg_id=NEW_EVENT_MESSAGE)

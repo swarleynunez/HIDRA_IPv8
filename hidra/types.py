@@ -9,15 +9,15 @@ class HIDRAPeer:
     HIDRA peer information
     """
 
-    def __init__(self, public_key: Key, max_usage: int):
-        self.public_key = public_key
-        self.max_usage = max_usage
-        self.reputation = 0
+    def __init__(self, balance: int, resource_offer: int):
+        self.balance = balance
+        self.resource_offer = resource_offer
+        self.free_resources = resource_offer
 
 
 class HIDRAEvent:
     """
-    HIDRA orchestration events
+    HIDRA offloading event
     """
 
     def __init__(self, applicant_peer_id: str, container_id: int):
