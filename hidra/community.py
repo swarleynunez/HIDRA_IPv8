@@ -11,7 +11,7 @@ from hidra.payload import REQUEST_RESOURCE_INFO, RESOURCE_INFO, RequestResourceI
     NewEventPayload, NEW_EVENT, EVENT_REPLY, EVENT_COMMIT, EventReplyPayload, EventCommitPayload
 from hidra.settings import HIDRASettings
 from hidra.types import HIDRAPeerInfo, IPv8PendingMessage, HIDRAEventInfo, HIDRAWorkload, HIDRAPeer, HIDRAEvent
-from hidra.utils import get_peer_id, get_object_id
+from hidra.utils import get_peer_id, get_object_id, sign_data
 from pyipv8.ipv8.community import Community
 from pyipv8.ipv8.lazy_community import lazy_wrapper
 from pyipv8.ipv8.requestcache import RequestCache
@@ -34,11 +34,14 @@ class HIDRACommunity(Community):
     def __init__(self, my_peer, endpoint, network) -> None:
         super().__init__(my_peer, endpoint, network)
 
-        # Peers
-        self.my_peer_id = get_peer_id(self.my_peer)
+        # Domains
+        self.next_sn_d = 0 # get_object_id()
         self.domains = {}
-        self.parent_domain_index = None
+        self.parent_domain_id = None
+
+        # Peers
         self.peers = {}
+        self.my_peer_id = get_peer_id(self.my_peer)
 
         # Events
         self.next_sn_e = 0
@@ -96,7 +99,7 @@ class HIDRACommunity(Community):
         # Initialize parent domain peers information
         balance = HIDRASettings.initial_balance
         r_max = HIDRASettings.max_resources
-        for peer in self.domains[self.parent_domain_index]:
+        for peer in self.domains[self.parent_domain_id]:
             # Update storage
             p = HIDRAPeer()
             p.peer_info = HIDRAPeerInfo(0, balance, r_max, r_max)
@@ -110,21 +113,21 @@ class HIDRACommunity(Community):
 
         # Set system domains
         n = SimulationSettings.peers_per_domain
-        domain_index = 0
         for i in range(0, len(peers), n):
             domain_peers = peers[i:i + n]
 
             # Set parent domain
-            if not self.parent_domain_index:
+            if not self.parent_domain_id:
                 for peer in domain_peers:
                     if self.my_peer.mid == peer.mid:
-                        self.parent_domain_index = domain_index
+                        self.parent_domain_id = self.next_sn_d
                         break
 
             # Update storage
-            self.domains[domain_index] = domain_peers
-            domain_index += 1
+            self.domains[self.next_sn_d] = domain_peers
+            self.next_sn_d += 1
 
+    # TODO
     def add_pending_message(self, sender, payload) -> None:
         # Get the next message ID
         message_id = get_object_id(self.my_peer_id, self.message_sn)
@@ -134,6 +137,7 @@ class HIDRACommunity(Community):
         self.messages[message_id] = IPv8PendingMessage(sender, payload)
         self.cache.add(HIDRANumberCache(self.cache, MESSAGES_PREFIX, message_id))
 
+    # TODO
     def process_pending_messages(self):
         for k, v in list(self.messages.items()):
             # Update storage and cache
@@ -147,6 +151,7 @@ class HIDRACommunity(Community):
                 # Process pending 'ResourceInfo' message
                 self.process_resource_info_message(v.sender, v.payload)
 
+    # TODO
     async def unload(self) -> None:
         await self.cache.shutdown()
         await super().unload()
@@ -183,27 +188,21 @@ class HIDRACommunity(Community):
         event_info = HIDRAEventInfo(workload, 1800, 1, int(time.time()) + 180)
 
         # Select a domain
-        if len(self.domains) > 1 and HIDRASettings.domain_selection_policy == "inter":
-            while True:
-                domain_index = random.randint(0, len(self.domains) - 1)
-                if domain_index != self.parent_domain_index:
-                    break
-        else:
-            domain_index = self.parent_domain_index
+        domain_id = self.select_domain()
 
         # Update storage
-        self.events[get_object_id(self.my_peer_id, sn_e)] = HIDRAEvent(event_info, domain_index)
+        self.events[get_object_id(self.my_peer_id, sn_e)] = HIDRAEvent(event_info, domain_id)
 
         # Debug
         print("[Time:" + str(get_event_loop().time()) +
-              "][Domain:" + str(self.parent_domain_index) +
+              "][Domain:" + str(self.parent_domain_id) +
               "][Peer:" + self.my_peer_id +
               "] Sending RequestResourceInfo ---> " +
-              "Domain:" + str(domain_index) +
+              "Domain:" + str(domain_id) +
               ", Event:" + str(sn_e))
 
         # Applicant sends RequestResourceInfo messages to the selected domain
-        for peer in self.domains[domain_index]:
+        for peer in self.domains[domain_id]:
             self.ez_send(peer, RequestResourceInfoPayload(sn_e, event_info))
 
     def process_request_resource_info_message(self, sender, payload) -> None:
@@ -212,13 +211,13 @@ class HIDRACommunity(Community):
         # Payload data
         available = random.choice([True, False])
         domain_info = {}
-        for peer in self.domains[self.parent_domain_index]:
+        for peer in self.domains[self.parent_domain_id]:
             peer_id = get_peer_id(peer)
             domain_info[peer_id] = self.peers[peer_id]
 
         # Debug
         print("[Time:" + str(get_event_loop().time()) +
-              "][Domain:" + str(self.parent_domain_index) +
+              "][Domain:" + str(self.parent_domain_id) +
               "][Peer:" + self.my_peer_id +
               "] Sending ResourceInfo --->" +
               " Peer:" + sender_id +
@@ -256,55 +255,59 @@ class HIDRACommunity(Community):
 
         # Requirements
         if len(event.available_peers) == 0:
-            print("INFO ---> Domain:" + str(event.domain_index) + " not available for Event:" + str(sn_e))
+            # TODO. Select another domain
+            print("INFO ---> Domain:" + str(event.domain_id) + " not available for Event:" + str(sn_e))
             return
 
         # Payload data
-        solver_id = random.choice(event.available_peers)  # Select a random available Solver
+        solver_id = random.choice(event.available_peers)
 
         # Update storage
         event.solver_id = solver_id
 
         # Debug
         print("[Time:" + str(get_event_loop().time()) +
-              "][Domain:" + str(self.parent_domain_index) +
+              "][Domain:" + str(self.parent_domain_id) +
               "][Peer:" + self.my_peer_id +
               "] Sending NewEvent ---> " +
-              "Domain:" + str(self.parent_domain_index) +
+              "Domain:" + str(self.parent_domain_id) +
               ", Event:" + str(sn_e) +
               ", Solver:" + str(solver_id))
 
         # Applicant sends NewEvent messages to its parent domain
-        for peer in self.domains[self.parent_domain_index]:
-            self.ez_send(peer, NewEventPayload(sn_e, solver_id, event.event_info))
+        for peer in self.domains[self.parent_domain_id]:
+            self.ez_send(peer, NewEventPayload(sn_e, event.domain_id, solver_id, event.event_info))
 
     def process_new_event_message(self, sender, payload) -> None:
         sender_id = get_peer_id(sender)
-        peer_info = self.peers[sender_id].peer_info
-        balance = payload.event_info["t_exec_value"] * payload.event_info["p_ratio_value"]
+        peer = self.peers[sender_id]
+        deposit = payload.event_info["t_exec_value"] * payload.event_info["p_ratio_value"]
 
         # Requirements
-        if payload.sn_e != peer_info.sn_e:
+        if payload.sn_e != peer.peer_info.sn_e:
             print("INFO ---> Missing past offloading events for Peer:" + sender_id)
             return
-        if balance > peer_info.balance:
+        if deposit > self.get_available_balance(peer):
             print("INFO ---> Peer:" + sender_id + " does not have enough balance")
             return
 
         # Update storage
-        peer_info.sn_e += 1
-
-
-        print(peer_info.sn_e)
-        print(peer_info.balance)
-        print(peer_info.r_max)
-        print(peer_info.r_free)
+        peer.peer_info.sn_e += 1
+        peer.deposits[payload.sn_e] = deposit
 
         # Payload data
 
+        # Format and sign event data
+        data = str(sender_id) + ":" + \
+               str(payload.domain_id) + ":" + \
+               str(payload.solver_id) + ":" + \
+               str(reputation_offer)
+        signature = sign_data(self.my_peer.key, data)
+
         # Debug
 
-        #
+        # Parent domain sends EventReply messages to the Applicant
+        self.ez_send(sender, EventReplyPayload(payload.sn_e))
 
     def process_event_reply_message(self, sender, payload) -> None:
         pass
@@ -319,6 +322,15 @@ class HIDRACommunity(Community):
     #########
     # Utils #
     #########
+    def select_domain(self) -> int:
+        if len(self.domains) > 1 and HIDRASettings.domain_selection_policy == "inter":
+            while True:
+                i = random.randint(0, len(self.domains) - 1)
+                if i != self.parent_domain_id:
+                    return i
+        else:
+            return self.parent_domain_id
+
     @staticmethod
     def select_peer_info(resource_replies: dict) -> HIDRAPeerInfo:
         # Count equal resource replies
@@ -329,3 +341,12 @@ class HIDRACommunity(Community):
             return HIDRAPeerInfo(**json.loads(counter[0][0]))
         else:
             return None
+
+    @staticmethod
+    def get_available_balance(peer: HIDRAPeer) -> int:
+        # Count total deposited/locked
+        deposited = 0
+        for _, v in peer.deposits.items():
+            deposited += v
+
+        return peer.peer_info.balance - deposited

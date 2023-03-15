@@ -16,7 +16,7 @@ class HIDRASettings:
     max_resources = 10240
 
     # Peers send offloading events to their parent domains (intra) or to other domains (inter)
-    domain_selection_policy = "inter"
+    domain_selection_policy = "intra"
 
     # Timeout for resource replies to select Solvers
     ssp_timeout = 5

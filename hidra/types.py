@@ -9,7 +9,7 @@ TimeUnit = Enum('TimeUnit', ['S', 'M', 'H', 'W'])
 
 class HIDRAPeerInfo:
     """
-    HIDRA peer information
+    HIDRA peer (shared information)
     """
 
     def __init__(self, sn_e: int, balance: int, r_max: int, r_free: int):
@@ -21,13 +21,13 @@ class HIDRAPeerInfo:
 
 class HIDRAPeer:
     """
-    HIDRA peer
+    HIDRA peer (local information)
     """
 
     def __init__(self):
-        self.peer_info: HIDRAPeerInfo
+        self.peer_info: HIDRAPeerInfo = None
         self.resource_replies = {}
-        self.balance_locks = {}
+        self.deposits = {}
 
 
 class HIDRAWorkload:
@@ -43,7 +43,7 @@ class HIDRAWorkload:
 
 class HIDRAEventInfo:
     """
-    HIDRA offloading event information
+    HIDRA offloading event (shared information)
     """
 
     def __init__(self, workload: HIDRAWorkload, t_exec_value: int, p_ratio_value: int, ts_start: int):
@@ -57,14 +57,14 @@ class HIDRAEventInfo:
 
 class HIDRAEvent:
     """
-    HIDRA offloading event
+    HIDRA offloading event (local information)
     """
 
-    def __init__(self, event_info: HIDRAEventInfo, domain_index: int):
+    def __init__(self, event_info: HIDRAEventInfo, domain_id: int):
         self.event_info = event_info
-        self.domain_index = domain_index
-        self.available_peers = []
+        self.domain_id = domain_id
         self.solver_id = None
+        self.available_peers = []
 
 
 class IPv8PendingMessage:

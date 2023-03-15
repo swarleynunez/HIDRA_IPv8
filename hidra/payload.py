@@ -69,6 +69,7 @@ class NewEventPayload:
     """
 
     sn_e: int
+    domain_id: str
     solver_id: str
     event_info: bytes
 
@@ -88,6 +89,7 @@ class EventReplyPayload:
     """
 
     sn_e: int
+    signature: bytes
 
 
 @dataclass(msg_id=EVENT_COMMIT)
