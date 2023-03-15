@@ -1,27 +1,27 @@
+import json
 import random
 import time
+from asyncio import get_event_loop
 from binascii import unhexlify
+from collections import Counter
 
+from bami.settings import SimulationSettings
 from hidra.caches import HIDRANumberCache
-from hidra.payload import NewEventPayload, EventReplyPayload, EventCommitPayload, EventCreditPayload, \
-    EventDiscoveryPayload, NEW_EVENT_MESSAGE, EVENT_REPLY_MESSAGE, EVENT_COMMIT_MESSAGE, \
-    EVENT_CREDIT_MESSAGE, EVENT_DISCOVERY_MESSAGE
+from hidra.payload import REQUEST_RESOURCE_INFO, RESOURCE_INFO, RequestResourceInfoPayload, ResourceInfoPayload, \
+    NewEventPayload, NEW_EVENT, EVENT_REPLY, EVENT_COMMIT, EventReplyPayload, EventCommitPayload
 from hidra.settings import HIDRASettings
-from hidra.types import HIDRAEvent, IPv8PendingMessage, HIDRAPeer, HIDRAContainer
-from hidra.utils import get_peer_id, get_event_solver, get_object_id, sign_data, verify_sign, select_own_solver
+from hidra.types import HIDRAPeerInfo, IPv8PendingMessage, HIDRAEventInfo, HIDRAWorkload, HIDRAPeer, HIDRAEvent
+from hidra.utils import get_peer_id, get_object_id
 from pyipv8.ipv8.community import Community
-from pyipv8.ipv8.keyvault.crypto import default_eccrypto
 from pyipv8.ipv8.lazy_community import lazy_wrapper
-from pyipv8.ipv8.peer import Peer
 from pyipv8.ipv8.requestcache import RequestCache
 
 # Cache prefixes
 EVENT_PREFIX = "HIDRA_events"
-CONTAINER_PREFIX = "HIDRA_containers"
 MESSAGES_PREFIX = "IPv8_messages"
 
-# Global variables
-CONTAINER_IMAGE_TAGS = ["nginx", "postgres", "hello-world", "busybox", "ubuntu"]
+# Debug
+APPLICANT = None
 
 
 class HIDRACommunity(Community):
@@ -34,429 +34,298 @@ class HIDRACommunity(Community):
     def __init__(self, my_peer, endpoint, network) -> None:
         super().__init__(my_peer, endpoint, network)
 
-        # Attributes
-        self.domain_peers = []
-        self.peer_info = {}
+        # Peers
+        self.my_peer_id = get_peer_id(self.my_peer)
+        self.domains = {}
+        self.parent_domain_index = None
+        self.peers = {}
 
+        # Events
+        self.next_sn_e = 0
         self.events = {}
-        self.containers = {}
+
+        # IPv8 Messages
         self.messages = {}
-        self.event_sn = 0  # Sequence number
-        self.container_sn = 0  # Sequence number
-        self.message_sn = 0  # Sequence number
+        self.message_sn = 0
 
-        # Overlay/community/cluster cache
-        self.request_cache = RequestCache()
+        # Overlay cache
+        self.cache = RequestCache()
 
-        # Testing
-        self.pi_msg_count = 0
-        self.e_count = 0
-        self.ne_msg_count = 0
-        self.er_msg_count = 0
-        self.eco_msg_count = 0
-        self.ecr_msg_count = 0
-        self.ed_msg_count = 0
-
-        # Set the initial peer state
-        self.initialize_peer()
+        # Debug
+        global APPLICANT
+        if not APPLICANT:
+            APPLICANT = self.my_peer_id
 
         # Message handlers
-        # self.add_message_handler(NEW_EVENT_MESSAGE, self.on_new_event)
-        # self.add_message_handler(EVENT_REPLY_MESSAGE, self.on_event_reply)
-        # self.add_message_handler(EVENT_COMMIT_MESSAGE, self.on_event_commit)
-        # self.add_message_handler(EVENT_CREDIT_MESSAGE, self.on_event_credit)
-        # self.add_message_handler(EVENT_DISCOVERY_MESSAGE, self.on_event_discovery)
-
-        # Register an asyncio task with the community
-        # This ensures that the task ends when the community is unloaded
-        # self.register_task("send_new_event", self.send_new_event, delay=3, interval=1)
+        self.add_message_handler(REQUEST_RESOURCE_INFO, self.on_request_resource_info)
+        self.add_message_handler(RESOURCE_INFO, self.on_resource_info)
+        self.add_message_handler(NEW_EVENT, self.on_new_event)
+        self.add_message_handler(EVENT_REPLY, self.on_event_reply)
+        self.add_message_handler(EVENT_COMMIT, self.on_event_commit)
 
     ########
     # Peer #
     ########
+    async def start(self):
+        # Register asyncio tasks with the community
+        # This ensures that tasks end when the community is unloaded
+        self.register_task("initialize_peer", self.initialize_peer)
+        await self.wait_for_tasks()
+
+        # Debug
+        if self.my_peer_id == APPLICANT:
+            for _ in range(1):
+                # Solver Selection Phase (SSP)
+                self.register_task("ssp_" + str(self.next_sn_e), self.ssp, self.next_sn_e)
+
+                # Workload Reservation Phase (WRP)
+                self.register_task("wrp_" + str(self.next_sn_e), self.wrp, self.next_sn_e,
+                                   delay=HIDRASettings.ssp_timeout)
+
+                # Workload Execution Phase (WEP)
+                self.register_task("wep_" + str(self.next_sn_e), self.wep, self.next_sn_e,
+                                   delay=HIDRASettings.ssp_timeout + HIDRASettings.wrp_timeout)
+
+                # Update storage
+                self.next_sn_e += 1
+
     def initialize_peer(self) -> None:
-        #
-        self.get_domain_peers(get_peer_id(self.my_peer))
+        # Initialize system domains deterministically
+        self.set_domains()
 
-        # Update storage
+        # Initialize parent domain peers information
         balance = HIDRASettings.initial_balance
-        resource_offer = HIDRASettings.initial_resource_offer
-        self.peer_info[get_peer_id(self.my_peer)] = HIDRAPeer(balance, resource_offer)
+        r_max = HIDRASettings.max_resources
+        for peer in self.domains[self.parent_domain_index]:
+            # Update storage
+            p = HIDRAPeer()
+            p.peer_info = HIDRAPeerInfo(0, balance, r_max, r_max)
+            self.peers[get_peer_id(peer)] = p
 
-    def get_domain_peers(self, applicant_peer_id: str) -> [Peer]:
-        # Get HIDRA peer IDs from IPv8 peers
-        peer_ids = []
-        for peer in self.get_peers():
-            peer_ids.append(get_peer_id(peer))
+    def set_domains(self) -> None:
+        # Sort array of IPv8 peers
+        peers = self.get_peers()
+        peers.append(self.my_peer)
+        peers.sort(key=lambda o: o.mid)
 
-        # Sort array of HIDRA peer IDs
-        peer_ids.sort()
+        # Set system domains
+        n = SimulationSettings.peers_per_domain
+        domain_index = 0
+        for i in range(0, len(peers), n):
+            domain_peers = peers[i:i + n]
 
-        # Select a deterministic random peer fanout
-        if HIDRASettings.max_fanout <= len(self.get_peers()) + 1:
-            fanout = HIDRASettings.max_fanout
-        else:
-            fanout = len(self.get_peers()) + 1
+            # Set parent domain
+            if not self.parent_domain_index:
+                for peer in domain_peers:
+                    if self.my_peer.mid == peer.mid:
+                        self.parent_domain_index = domain_index
+                        break
 
-        random.seed(applicant_peer_id)
-        domain_peer_ids = random.sample(peer_ids, k=HIDRASettings.max_domain_peers)
-        random.seed()  # Default timestamp seed
+            # Update storage
+            self.domains[domain_index] = domain_peers
+            domain_index += 1
 
-        # Convert HIDRA peer IDs to IPv8 peers
-        domain_peers = []
-        for peer in self.get_peers():
-            if get_peer_id(peer) in domain_peer_ids:
-                domain_peers.append(peer)
-
-        return domain_peers
-
-    def get_peer_from_id(self, peer_id) -> Peer:
-        if get_peer_id(self.my_peer) == peer_id:
-            return self.my_peer
-        else:
-            for peer in self.get_peers():
-                if get_peer_id(peer) == peer_id:
-                    return peer
-
-    async def unload(self) -> None:
-        await self.request_cache.shutdown()
-        await super().unload()
-
-    ############
-    # Messages #
-    ############
-    @lazy_wrapper(NewEventPayload)
-    def on_new_event(self, peer, payload) -> None:
-        self.process_new_event_message(get_peer_id(peer), payload)
-
-    @lazy_wrapper(EventReplyPayload)
-    def on_event_reply(self, peer, payload) -> None:
-        self.process_pending_messages()
-        self.process_event_reply_message(get_peer_id(peer), payload)
-
-    @lazy_wrapper(EventCommitPayload)
-    def on_event_commit(self, peer, payload) -> None:
-        self.process_pending_messages()
-        self.process_event_commit_message(get_peer_id(peer), payload)
-
-    @lazy_wrapper(EventCreditPayload)
-    def on_event_credit(self, peer, payload) -> None:
-        self.process_pending_messages()
-        self.process_event_credit_message(get_peer_id(peer), payload)
-
-    @lazy_wrapper(EventDiscoveryPayload)
-    def on_event_discovery(self, peer, payload) -> None:
-        self.process_event_discovery_message(get_peer_id(peer), payload)
-
-    def send_new_event(self) -> None:
-        my_peer_id = get_peer_id(self.my_peer)
-
-        # Payload data
-        # container_id = self.select_container()
-        # if not container_id:
-        #     return
-
-        # Get the next container ID
-        container_id = get_object_id(my_peer_id, self.container_sn)
-        self.container_sn += 1
-        image_tag = random.choice(CONTAINER_IMAGE_TAGS)
-
-        # Get the next event ID
-        event_id = get_object_id(my_peer_id, self.event_sn)
-        self.event_sn += 1
-
-        # Debug
-        # print("[" + my_peer_id + "] Sending event ---> EID=" + str(event_id) + ", CID=" + str(container_id))
-
-        # Send a NewEvent/PREPARE message to my peers
-        for peer in self.get_fanout_peers(my_peer_id):
-            self.ez_send(peer, NewEventPayload(event_id, container_id, image_tag))
-
-    def process_new_event_message(self, sender_id, payload) -> None:
-        # Requirements
-        if self.exist_event(payload.event_id):
-            # Dismissing the message...
-            return
-
-        # Debug
-        self.ne_msg_count += 1
-        # print("[" + get_peer_id(self.my_peer) + "] NewEvent received ---> EID=" +
-        #       str(payload.event_id) + ", From=" + get_peer_id(sender))
-
-        # Payload data
-        usage_offer = random.randint(0, 10 ** (HIDRASettings.usage_size - 1))
-
-        # Update storage and cache
-        self.events[payload.event_id] = HIDRAEvent(sender_id, payload.container_id)
-        if not self.exist_container(payload.container_id):
-            self.containers[payload.container_id] = HIDRAContainer(payload.container_image_tag)
-        self.request_cache.add(HIDRANumberCache(self.request_cache, EVENT_PREFIX, payload.event_id))
-
-        # Format and sign event data
-        data = str(payload.event_id) + "," + \
-               str(usage_offer) + "," + \
-               str(usage_offer)
-        signature = sign_data(self.my_peer.key, data)
-
-        # Send an EventReply/ACK message to the applicant peer
-        self.ez_send(self.get_peer_from_id(sender_id),
-                     EventReplyPayload(payload.event_id, usage_offer, usage_offer, signature))
-
-    # Executed by applicant peers
-    def process_event_reply_message(self, sender_id, payload) -> None:
-        # Requirements
-        if not self.exist_event(payload.event_id):
-            self.add_pending_message(sender_id, payload)
-            return
-        event = self.events[payload.event_id]
-        if len(event.ack_signatures) == self.get_required_replies():
-            # Dismissing the message...
-            return
-        # Verify NewEvent/PREPARE payload signature
-        data = str(payload.event_id) + "," + \
-               str(payload.usage_offer) + "," + \
-               str(payload.reputation_offer)
-        if not verify_sign(self.peers[sender_id].public_key, data, payload.signature):
-            # Dismissing the message...
-            return
-
-        # Debug
-        self.er_msg_count += 1
-        # print("[" + get_peer_id(self.my_peer) + "] EventReply received ---> EID=" +
-        #       str(payload.event_id) + ", From=" + sender_id)
-
-        # Update storage
-        event.usage_offers[sender_id] = payload.usage_offer
-        event.reputation_offers[sender_id] = payload.reputation_offer
-        event.ack_signatures[sender_id] = str(payload.signature, "latin1")  # Due to JSON bytes serialization
-
-        # Send all EventReply/ACKs to my peers (COMMIT message)
-        if len(event.ack_signatures) == self.get_required_replies():
-            for peer in self.get_fanout_peers(event.applicant):
-                self.ez_send(peer, EventCommitPayload(payload.event_id,
-                                                      event.usage_offers,
-                                                      event.reputation_offers,
-                                                      event.ack_signatures))
-
-    def process_event_commit_message(self, sender_id, payload) -> None:
-        # Requirements
-        if not self.exist_event(payload.event_id):
-            self.add_pending_message(sender_id, payload)
-            return
-        if len(payload.ack_signatures) != self.get_required_replies():
-            # Dismissing the message...
-            return
-        # Verify NewEvent/PREPARE payload signatures
-        event = self.events[payload.event_id]
-        for k, v in payload.ack_signatures.items():
-            data = str(payload.event_id) + "," + \
-                   str(payload.usage_offers[k]) + "," + \
-                   str(payload.reputation_offers[k])
-            if not verify_sign(self.peers[k].public_key, data, bytes(v, "latin1")):
-                # Dismissing the message...
-                return
-
-        # Debug
-        self.eco_msg_count += 1
-        # print("[" + get_peer_id(self.my_peer) + "] EventCommit received ---> EID=" +
-        #       str(payload.event_id) + ", From=" + get_peer_id(sender))
-
-        # Update storage
-        event.usage_offers = payload.usage_offers
-        event.reputation_offers = payload.reputation_offers
-        event.ack_signatures = payload.ack_signatures
-
-        # Select the event solver
-        solver = select_own_solver(event.usage_offers, event.reputation_offers)
-
-        # TODO: settle reputations
-        self.peers[solver].reputation -= event.reputation_offers[solver]
-        # ...
-        # And for the other event peers?
-
-        # Am I the event solver?
-        execution_result = 0
-        if solver == get_peer_id(self.my_peer):
-            # Execute container synchronously
-            execution_result = self.execute_container(event.container_id)
-
-        # Format and sign approval data
-        data = str(payload.event_id) + "," + \
-               solver + "," + \
-               str(execution_result)
-        signature = sign_data(self.my_peer.key, data)
-
-        # Send an EventCredit/CREDIT message to the applicant peer
-        self.ez_send(self.get_peer_from_id(sender_id),
-                     EventCreditPayload(payload.event_id, solver, execution_result, signature))
-
-    # Executed by applicant peers
-    def process_event_credit_message(self, sender_id, payload) -> None:
-        # Requirements
-        if not self.exist_event(payload.event_id):
-            self.add_pending_message(sender_id, payload)
-            return
-        event = self.events[payload.event_id]
-        solver = get_event_solver(event.votes, self.get_required_votes())
-        if solver and self.has_already_voted(payload.event_id, solver):
-            # Dismissing the message...
-            return
-        # Verify EventCredit/CREDIT payload signature
-        data = str(payload.event_id) + "," + \
-               payload.solver + "," + \
-               str(payload.execution_result)
-        if not verify_sign(self.peers[sender_id].public_key, data, payload.signature):
-            # Dismissing the message...
-            return
-
-        # Debug
-        self.ecr_msg_count += 1
-        # print("[" + get_peer_id(self.my_peer) + "] EventCredit received ---> EID=" +
-        #       str(payload.event_id) + ", From=" + sender_id)
-
-        # Update storage
-        event.votes[sender_id] = payload.solver
-        event.credit_signatures[sender_id] = str(payload.signature, "latin1")  # Due to JSON bytes serialization
-        event.execution_results[sender_id] = payload.execution_result
-
-        # Waiting for the solver and f + 1 EventCredit/CREDIT messages (final certificate)
-        solver = get_event_solver(event.votes, self.get_required_votes())
-        if solver and self.has_already_voted(payload.event_id, solver):
-            # Debug
-            self.e_count += 1
-            # print("[" + get_peer_id(self.my_peer) + "] Executed container ---> CID=" +
-            #       str(event.container_id), str(event.execution_results[solver]))
-
-            # Update storage and cache
-            event.end_time = time.time_ns()
-            self.containers[event.container_id].host = solver
-            self.request_cache.pop(EVENT_PREFIX, payload.event_id)
-            if self.request_cache.has(CONTAINER_PREFIX, event.container_id):
-                self.request_cache.pop(CONTAINER_PREFIX, event.container_id)
-
-            # Optional. Send the whole event to other peers
-            # Sending the event only to my fanout
-            # for peer in self.get_fanout_peers(event.applicant):
-            #    self.ez_send(peer, EventDiscoveryPayload(payload.event_id, event))
-
-    def process_event_discovery_message(self, sender_id, payload) -> None:
-        # Requirements
-        if len(payload.event["ack_signatures"]) != self.get_required_replies():
-            # Dismissing the message...
-            return
-        # Verify NewEvent/PREPARE payload signatures
-        for k, v in payload.event["ack_signatures"].items():
-            data = str(payload.event_id) + "," + \
-                   str(payload.event["usage_offers"][k]) + "," + \
-                   str(payload.event["reputation_offers"][k])
-            if not verify_sign(self.peers[k].public_key, data, bytes(v, "latin1")):
-                # Dismissing the message...
-                return
-        if not get_event_solver(payload.event["votes"], self.get_required_votes()):
-            # Dismissing the message...
-            return
-        # Verify EventCredit/CREDIT payload signatures
-        for k, v in payload.event["credit_signatures"].items():
-            data = str(payload.event_id) + "," + \
-                   payload.event["votes"][k] + "," + \
-                   str(payload.event["execution_results"][k])
-            if not verify_sign(self.peers[k].public_key, data, bytes(v, "latin1")):
-                # Dismissing the message...
-                return
-
-        # Debug
-        self.ed_msg_count += 1
-        # print("[" + get_peer_id(self.my_peer) + "] EventDelivery received ---> EID=" +
-        #       str(payload.event_id) + ", From=" + sender_id)
-
-        # Update storage and cache
-        if self.exist_event(payload.event_id):
-            if get_peer_id(self.my_peer) != sender_id:
-                event = self.events[payload.event_id]
-                event.votes = payload.event["votes"]
-                event.credit_signatures = payload.event["credit_signatures"]
-                event.execution_results = payload.event["execution_results"]
-                event.end_time = payload.event["end_time"]
-                self.containers[event.container_id].host = get_event_solver(event.votes, self.get_required_votes())
-                self.request_cache.pop(EVENT_PREFIX, payload.event_id)
-                if self.request_cache.has(CONTAINER_PREFIX, event.container_id):
-                    self.request_cache.pop(CONTAINER_PREFIX, event.container_id)
-        else:
-            pass
-
-    def add_pending_message(self, sender_id, payload) -> None:
+    def add_pending_message(self, sender, payload) -> None:
         # Get the next message ID
-        message_id = get_object_id(get_peer_id(self.my_peer), self.message_sn)
+        message_id = get_object_id(self.my_peer_id, self.message_sn)
         self.message_sn += 1
 
         # Update storage and cache
-        self.messages[message_id] = IPv8PendingMessage(sender_id, payload)
-        self.request_cache.add(HIDRANumberCache(self.request_cache, MESSAGES_PREFIX, message_id))
+        self.messages[message_id] = IPv8PendingMessage(sender, payload)
+        self.cache.add(HIDRANumberCache(self.cache, MESSAGES_PREFIX, message_id))
 
     def process_pending_messages(self):
         for k, v in list(self.messages.items()):
             # Update storage and cache
             self.messages.pop(k)
-            self.request_cache.pop(MESSAGES_PREFIX, k)
+            self.cache.pop(MESSAGES_PREFIX, k)
 
-            if v.payload.msg_id == EVENT_REPLY_MESSAGE:
-                # Process pending 'EventReply' message
-                self.process_event_reply_message(v.sender, v.payload)
-            elif v.payload.msg_id == EVENT_COMMIT_MESSAGE:
-                # Process pending 'EventCommit' message
-                self.process_event_commit_message(v.sender, v.payload)
-            elif v.payload.msg_id == EVENT_CREDIT_MESSAGE:
-                # Process pending 'EventCommit' message
-                self.process_event_credit_message(v.sender, v.payload)
+            if v.payload.msg_id == REQUEST_RESOURCE_INFO:
+                # Process pending 'RequestResourceInfo' message
+                self.process_request_resource_info_message(v.sender, v.payload)
+            elif v.payload.msg_id == RESOURCE_INFO:
+                # Process pending 'ResourceInfo' message
+                self.process_resource_info_message(v.sender, v.payload)
 
-    ##########
-    # Events #
-    ##########
-    @staticmethod
-    def get_required_replies() -> int:
-        """
-        Number of required replies/ACKs in events
-        """
+    async def unload(self) -> None:
+        await self.cache.shutdown()
+        await super().unload()
 
-        return 2 * HIDRASettings.faulty_peers + 1
+    #############
+    # Callbacks #
+    #############
+    @lazy_wrapper(RequestResourceInfoPayload)
+    def on_request_resource_info(self, sender, payload) -> None:
+        self.process_request_resource_info_message(sender, payload)
 
-    @staticmethod
-    def get_required_votes() -> int:
-        """
-        Number of required votes/CREDITs in events
-        """
+    @lazy_wrapper(ResourceInfoPayload)
+    def on_resource_info(self, sender, payload) -> None:
+        self.process_resource_info_message(sender, payload)
 
-        return HIDRASettings.faulty_peers + 1
+    @lazy_wrapper(NewEventPayload)
+    def on_new_event(self, sender, payload) -> None:
+        self.process_new_event_message(sender, payload)
 
-    ##############
-    # Containers #
-    ##############
-    def select_container(self) -> int:
-        # Selecting a random own container not used by an event
-        selectable = []
-        for k, v in self.containers.items():
-            if v.host == get_peer_id(self.my_peer) and not self.request_cache.has(CONTAINER_PREFIX, k):
-                selectable.append(k)
+    @lazy_wrapper(EventReplyPayload)
+    def on_event_reply(self, sender, payload) -> None:
+        self.process_event_reply_message(sender, payload)
 
-        if len(selectable) > 0:
-            container_id = random.choice(selectable)
-            self.request_cache.add(HIDRANumberCache(self.request_cache, CONTAINER_PREFIX, container_id))
-            return container_id
+    @lazy_wrapper(EventCommitPayload)
+    def on_event_commit(self, sender, payload) -> None:
+        self.process_event_commit_message(sender, payload)
 
-    @staticmethod
-    def execute_container(container_id) -> int:
+    #########
+    # Tasks #
+    #########
+    def ssp(self, sn_e) -> None:
+        # Payload data
+        workload = HIDRAWorkload("nginx", 1024, 8888)
+        event_info = HIDRAEventInfo(workload, 1800, 1, int(time.time()) + 180)
+
+        # Select a domain
+        if len(self.domains) > 1 and HIDRASettings.domain_selection_policy == "inter":
+            while True:
+                domain_index = random.randint(0, len(self.domains) - 1)
+                if domain_index != self.parent_domain_index:
+                    break
+        else:
+            domain_index = self.parent_domain_index
+
+        # Update storage
+        self.events[get_object_id(self.my_peer_id, sn_e)] = HIDRAEvent(event_info, domain_index)
+
         # Debug
-        # print("[" + get_peer_id(self.my_peer) + "] Executing container ---> CID=" + str(container_id))
-        return container_id
+        print("[Time:" + str(get_event_loop().time()) +
+              "][Domain:" + str(self.parent_domain_index) +
+              "][Peer:" + self.my_peer_id +
+              "] Sending RequestResourceInfo ---> " +
+              "Domain:" + str(domain_index) +
+              ", Event:" + str(sn_e))
 
-    ############
-    # Checkers #
-    ############
-    def exist_event(self, event_id) -> bool:
-        return event_id in self.events
+        # Applicant sends RequestResourceInfo messages to the selected domain
+        for peer in self.domains[domain_index]:
+            self.ez_send(peer, RequestResourceInfoPayload(sn_e, event_info))
 
-    def has_already_voted(self, event_id, peer_id) -> bool:
-        return peer_id in self.events[event_id].votes
+    def process_request_resource_info_message(self, sender, payload) -> None:
+        sender_id = get_peer_id(sender)
 
-    def exist_container(self, container_id) -> bool:
-        return container_id in self.containers
+        # Payload data
+        available = random.choice([True, False])
+        domain_info = {}
+        for peer in self.domains[self.parent_domain_index]:
+            peer_id = get_peer_id(peer)
+            domain_info[peer_id] = self.peers[peer_id]
+
+        # Debug
+        print("[Time:" + str(get_event_loop().time()) +
+              "][Domain:" + str(self.parent_domain_index) +
+              "][Peer:" + self.my_peer_id +
+              "] Sending ResourceInfo --->" +
+              " Peer:" + sender_id +
+              ", Event:" + str(payload.sn_e) +
+              ", Available:" + ("T" if available else "F"))
+
+        # Selected domain sends ResourceInfo messages to the Applicant
+        self.ez_send(sender, ResourceInfoPayload(payload.sn_e, available, domain_info))
+
+    def process_resource_info_message(self, sender, payload) -> None:
+        sender_id = get_peer_id(sender)
+
+        # Is the sender peer available to manage the offloading event?
+        if payload.available:
+            self.events[get_object_id(self.my_peer_id, payload.sn_e)].available_peers.append(sender_id)
+
+        # Deliver resource replies
+        for k, v in payload.resource_replies.items():
+            # Update storage
+            if k not in self.peers:
+                p = HIDRAPeer()
+                p.resource_replies[sender_id] = v["peer_info"]
+                self.peers[k] = p
+            else:
+                self.peers[k].resource_replies[sender_id] = v["peer_info"]
+
+            # Select peer info from resource replies
+            peer_info = self.select_peer_info(self.peers[k].resource_replies)
+            if peer_info:
+                # Update storage
+                self.peers[k].peer_info = peer_info
+
+    def wrp(self, sn_e):
+        event = self.events[get_object_id(self.my_peer_id, sn_e)]
+
+        # Requirements
+        if len(event.available_peers) == 0:
+            print("INFO ---> Domain:" + str(event.domain_index) + " not available for Event:" + str(sn_e))
+            return
+
+        # Payload data
+        solver_id = random.choice(event.available_peers)  # Select a random available Solver
+
+        # Update storage
+        event.solver_id = solver_id
+
+        # Debug
+        print("[Time:" + str(get_event_loop().time()) +
+              "][Domain:" + str(self.parent_domain_index) +
+              "][Peer:" + self.my_peer_id +
+              "] Sending NewEvent ---> " +
+              "Domain:" + str(self.parent_domain_index) +
+              ", Event:" + str(sn_e) +
+              ", Solver:" + str(solver_id))
+
+        # Applicant sends NewEvent messages to its parent domain
+        for peer in self.domains[self.parent_domain_index]:
+            self.ez_send(peer, NewEventPayload(sn_e, solver_id, event.event_info))
+
+    def process_new_event_message(self, sender, payload) -> None:
+        sender_id = get_peer_id(sender)
+        peer_info = self.peers[sender_id].peer_info
+        balance = payload.event_info["t_exec_value"] * payload.event_info["p_ratio_value"]
+
+        # Requirements
+        if payload.sn_e != peer_info.sn_e:
+            print("INFO ---> Missing past offloading events for Peer:" + sender_id)
+            return
+        if balance > peer_info.balance:
+            print("INFO ---> Peer:" + sender_id + " does not have enough balance")
+            return
+
+        # Update storage
+        peer_info.sn_e += 1
+
+
+        print(peer_info.sn_e)
+        print(peer_info.balance)
+        print(peer_info.r_max)
+        print(peer_info.r_free)
+
+        # Payload data
+
+        # Debug
+
+        #
+
+    def process_event_reply_message(self, sender, payload) -> None:
+        pass
+
+    def process_event_commit_message(self, sender, payload) -> None:
+        pass
+
+    def wep(self, sn_e):
+        pass
+        # print(get_event_loop().time())
+
+    #########
+    # Utils #
+    #########
+    @staticmethod
+    def select_peer_info(resource_replies: dict) -> HIDRAPeerInfo:
+        # Count equal resource replies
+        counter = Counter(json.dumps(v) for v in resource_replies.values()).most_common(1)
+
+        # f + 1 equal resource replies?
+        if counter[0][1] == SimulationSettings.faulty_peers + 1:
+            return HIDRAPeerInfo(**json.loads(counter[0][0]))
+        else:
+            return None

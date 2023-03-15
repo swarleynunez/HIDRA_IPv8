@@ -22,7 +22,7 @@ from pyipv8.simulation.simulation_endpoint import SimulationEndpoint
 
 from bami.settings import SimulationSettings
 from hidra.settings import HIDRASettings
-from hidra.utils import get_peer_id, get_event_solver
+from hidra.utils import get_peer_id
 
 
 class BamiSimulation(TaskManager):
@@ -60,7 +60,8 @@ class BamiSimulation(TaskManager):
     async def start_ipv8_nodes(self) -> None:
         for peer_id in range(1, self.settings.peers + 1):
             if peer_id % 100 == 0:
-                print("Created %d peers..." % peer_id)
+                pass
+                # print("Created %d peers..." % peer_id)
 
             endpoint = SimulationEndpoint()
             config = self.get_ipv8_builder(peer_id)
@@ -114,7 +115,7 @@ class BamiSimulation(TaskManager):
 
         await sleep(5)  # Make sure peers have time to discover each other
 
-        print("IPv8 peer discovery complete")
+        # print("IPv8 peer discovery complete")
 
     def apply_latencies(self):
         """
@@ -128,7 +129,7 @@ class BamiSimulation(TaskManager):
             for line in latencies_file.readlines():
                 latencies.append([float(l) for l in line.strip().split(",")])
 
-        print("Read latency matrix with %d sites!" % len(latencies))
+        # print("Read latency matrix with %d sites!" % len(latencies))
 
         # Assign nodes to sites in a round-robin fashion and apply latencies accordingly
         for from_ind, from_node in enumerate(self.nodes):
@@ -138,17 +139,17 @@ class BamiSimulation(TaskManager):
                 latency_ms = int(latencies[from_site_ind][to_site_ind]) / 1000
                 from_node.endpoint.latencies[to_node.endpoint.wan_address] = latency_ms
 
-        print("Latencies applied!")
+        # print("Latencies applied!")
 
     async def start_simulation(self) -> None:
-        print("Starting simulation with %d peers..." % self.settings.peers)
+        # print("Starting simulation with %d peers..." % self.settings.peers)
 
         if self.settings.profile:
             yappi.start(builtins=True)
 
         start_time = time.time()
         await asyncio.sleep(self.settings.duration)
-        print("Simulation took %f seconds" % (time.time() - start_time))
+        # print("Simulation took %f seconds" % (time.time() - start_time))
 
         if self.settings.profile:
             yappi.stop()
@@ -162,7 +163,10 @@ class BamiSimulation(TaskManager):
         """
         This method is called when IPv8 is started and peer discovery is finished.
         """
-        pass
+
+        # HIDRA
+        for node in self.nodes:
+            await node.overlay.start()
 
     def on_simulation_finished(self) -> None:
         """
@@ -170,7 +174,7 @@ class BamiSimulation(TaskManager):
         """
 
         # HIDRA
-        self.print_final_statistics()
+        # self.print_final_statistics()
 
     async def run(self) -> None:
         self.setup_directories()
@@ -179,7 +183,7 @@ class BamiSimulation(TaskManager):
         await self.ipv8_discover_peers()
         self.apply_latencies()
         await self.on_ipv8_ready()
-        print("Simulation setup took %f seconds" % (time.time() - start_time))
+        # print("Simulation setup took %f seconds" % (time.time() - start_time))
         await self.start_simulation()
         self.on_simulation_finished()
 
@@ -205,7 +209,7 @@ class BamiSimulation(TaskManager):
 
     def print_events(self):
         print("\n-------------------- Events --------------------")
-        faulty_peers = HIDRASettings.faulty_peers
+        faulty_peers = SimulationSettings.faulty_peers
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
             print("[" + peer_id + "]:")
@@ -219,8 +223,7 @@ class BamiSimulation(TaskManager):
                     peer.overlay.er_msg_count -= len(v.ack_signatures)
                     continue
                 if v.applicant == peer_id:
-                    print(" - EID=" + str(k), v.start_time, v.container_id,
-                          get_event_solver(v.votes, faulty_peers + 1), v.end_time)
+                    print(" - EID=" + str(k), v.start_time, v.container_id, v.end_time)
 
     def print_containers(self):
         print("\n------------------ Containers ------------------")
@@ -239,10 +242,10 @@ class BamiSimulation(TaskManager):
         print("\n------------------- Messages -------------------")
         pi_count = e_count = ne_count = er_count = eco_count = esr_count = ed_count = 0
         peers_count = SimulationSettings.peers
-        fanout = HIDRASettings.max_fanout
+        fanout = SimulationSettings.peers_per_domain
         if fanout > peers_count:
             fanout = peers_count
-        faulty_peers = HIDRASettings.faulty_peers
+        faulty_peers = SimulationSettings.faulty_peers
         for peer in self.nodes:
             pi_count += peer.overlay.pi_msg_count
             e_count += peer.overlay.e_count

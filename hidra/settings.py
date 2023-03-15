@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 
-from bami.settings import SimulationSettings
-
 
 @dataclass
 class HIDRASettings:
@@ -9,13 +7,22 @@ class HIDRASettings:
     peer_id_size: int = 4
 
     # Identifier size of HIDRA objects (in number of hexadecimal characters)
-    object_id_size: int = 4
+    object_id_size: int = 8
 
     # Initial balance per peer
-    initial_balance = 100
+    initial_balance = 3600
 
     # Initial resource offer per peer
-    initial_resource_offer = 10240
+    max_resources = 10240
+
+    # Peers send offloading events to their parent domains (intra) or to other domains (inter)
+    domain_selection_policy = "inter"
+
+    # Timeout for resource replies to select Solvers
+    ssp_timeout = 5
+
+    # Timeout to start the monitoring process of a workload
+    wrp_timeout = 5
 
     # TODO
     # Number of containers initially executed by each peer

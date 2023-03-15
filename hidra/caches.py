@@ -6,8 +6,8 @@ class HIDRANumberCache(NumberCache):
     Number cache for HIDRA objects identified by an ID
     """
 
-    def __init__(self, request_cache, prefix: str, object_id: int):
-        super().__init__(request_cache, prefix, object_id)
+    def __init__(self, cache, prefix: str, object_id: int):
+        super().__init__(cache, prefix, object_id)
 
     @property
     def timeout_delay(self):

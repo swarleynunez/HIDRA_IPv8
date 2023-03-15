@@ -3,104 +3,97 @@ from dataclasses import dataclass
 
 from pyipv8.ipv8.messaging.payload_dataclass import overwrite_dataclass
 
-from hidra.types import HIDRAEvent
+from hidra.types import HIDRAEventInfo, HIDRAPeerInfo
 
 # Enhance normal dataclasses for IPv8
 dataclass = overwrite_dataclass(dataclass)
 
-# Identifiers
-NEW_EVENT_MESSAGE = 1
-EVENT_REPLY_MESSAGE = 2
-EVENT_COMMIT_MESSAGE = 3
-EVENT_CREDIT_MESSAGE = 4
-EVENT_DISCOVERY_MESSAGE = 5
+# SSP Identifiers
+REQUEST_RESOURCE_INFO = 1
+RESOURCE_INFO = 2
+
+# WRP Identifiers
+NEW_EVENT = 3
+EVENT_REPLY = 4
+EVENT_COMMIT = 5
+
+# WEP Identifiers
+NEW_RESERVATION = 6
+RESERVATION_REPLY = 7
+RESERVATION_COMMIT_1 = 8
+RESERVATION_COMMIT_2 = 9
+RESERVATION_COMMIT_3 = 10
 
 
-@dataclass(msg_id=NEW_EVENT_MESSAGE)
+@dataclass(msg_id=REQUEST_RESOURCE_INFO)
+class RequestResourceInfoPayload:
+    """
+    Payload for HIDRA's 'RequestResourceInfo' messages
+    """
+
+    sn_e: int
+    event_info: bytes
+
+    @staticmethod
+    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
+        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
+        return json.loads(serialized_obj.decode("utf-8"))
+
+
+@dataclass(msg_id=RESOURCE_INFO)
+class ResourceInfoPayload:
+    """
+    Payload for HIDRA's 'ResourceInfo' messages
+    """
+
+    sn_e: int
+    available: bool
+    resource_replies: bytes
+
+    @staticmethod
+    def fix_pack_resource_replies(obj: [HIDRAPeerInfo]) -> bytes:
+        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_resource_replies(cls, serialized_obj: bytes) -> [HIDRAPeerInfo]:
+        return json.loads(serialized_obj.decode("utf-8"))
+
+
+@dataclass(msg_id=NEW_EVENT)
 class NewEventPayload:
     """
     Payload for HIDRA's 'NewEvent' messages
     """
 
-    event_id: int
-    container_id: int
-    container_image_tag: str
+    sn_e: int
+    solver_id: str
+    event_info: bytes
+
+    @staticmethod
+    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
+        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
+        return json.loads(serialized_obj.decode("utf-8"))
 
 
-@dataclass(msg_id=EVENT_REPLY_MESSAGE)
+@dataclass(msg_id=EVENT_REPLY)
 class EventReplyPayload:
     """
     Payload for HIDRA's 'EventReply' messages
     """
 
-    event_id: int
-    usage_offer: int
-    reputation_offer: int
-    signature: bytes
+    sn_e: int
 
 
-@dataclass(msg_id=EVENT_COMMIT_MESSAGE)
+@dataclass(msg_id=EVENT_COMMIT)
 class EventCommitPayload:
     """
     Payload for HIDRA's 'EventCommit' messages
     """
 
-    event_id: int
-    usage_offers: bytes
-    reputation_offers: bytes
-    ack_signatures: bytes
-
-    @staticmethod
-    def fix_pack_usage_offers(dictionary: dict) -> bytes:
-        return json.dumps(dictionary).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_usage_offers(cls, serialized_dictionary: bytes) -> dict:
-        return json.loads(serialized_dictionary.decode("utf-8"))
-
-    @staticmethod
-    def fix_pack_reputation_offers(dictionary: dict) -> bytes:
-        return json.dumps(dictionary).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_reputation_offers(cls, serialized_dictionary: bytes) -> dict:
-        return json.loads(serialized_dictionary.decode("utf-8"))
-
-    @staticmethod
-    def fix_pack_ack_signatures(dictionary: dict) -> bytes:
-        return json.dumps(dictionary).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_ack_signatures(cls, serialized_dictionary: bytes) -> dict:
-        return json.loads(serialized_dictionary.decode("utf-8"))
-
-
-@dataclass(msg_id=EVENT_CREDIT_MESSAGE)
-class EventCreditPayload:
-    """
-    Payload for HIDRA's 'EventCredit' messages
-    """
-
-    event_id: int
-    solver: str
-    execution_result: int
-    signature: bytes
-
-
-# Optional. To send/retrieve event data
-@dataclass(msg_id=EVENT_DISCOVERY_MESSAGE)
-class EventDiscoveryPayload:
-    """
-    Payload for HIDRA's 'EventDiscovery' messages
-    """
-
-    event_id: int
-    event: bytes
-
-    @staticmethod
-    def fix_pack_event(event: HIDRAEvent) -> bytes:
-        return json.dumps(event, default=lambda o: o.__dict__).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_event(cls, serialized_event: bytes) -> dict:
-        return json.loads(serialized_event.decode("utf-8"))
+    sn_e: int

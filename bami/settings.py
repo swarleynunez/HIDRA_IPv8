@@ -5,10 +5,10 @@ from typing import Optional
 @dataclass
 class SimulationSettings:
     # Number of HIDRA domains
-    domains: int = 3
+    domains: int = 2
 
     # Number of IPv8 peers per HIDRA domain
-    peers_per_domain = 5
+    peers_per_domain = 3
 
     # Number of IPv8 peers
     peers: int = domains * peers_per_domain
