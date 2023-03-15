@@ -11,7 +11,7 @@ from hidra.payload import REQUEST_RESOURCE_INFO, RESOURCE_INFO, RequestResourceI
     NewEventPayload, NEW_EVENT, EVENT_REPLY, EVENT_COMMIT, EventReplyPayload, EventCommitPayload
 from hidra.settings import HIDRASettings
 from hidra.types import HIDRAPeerInfo, IPv8PendingMessage, HIDRAEventInfo, HIDRAWorkload, HIDRAPeer, HIDRAEvent
-from hidra.utils import get_peer_id, get_object_id, sign_data
+from hidra.utils import get_peer_id, get_object_id, sign_data, verify_sign
 from pyipv8.ipv8.community import Community
 from pyipv8.ipv8.lazy_community import lazy_wrapper
 from pyipv8.ipv8.requestcache import RequestCache
@@ -35,7 +35,7 @@ class HIDRACommunity(Community):
         super().__init__(my_peer, endpoint, network)
 
         # Domains
-        self.next_sn_d = 0 # get_object_id()
+        self.next_sn_d = 0
         self.domains = {}
         self.parent_domain_id = None
 
@@ -209,11 +209,12 @@ class HIDRACommunity(Community):
         sender_id = get_peer_id(sender)
 
         # Payload data
+        # TODO. Check event info to make a decision
         available = random.choice([True, False])
         domain_info = {}
         for peer in self.domains[self.parent_domain_id]:
             peer_id = get_peer_id(peer)
-            domain_info[peer_id] = self.peers[peer_id]
+            domain_info[peer_id] = self.peers[peer_id].peer_info
 
         # Debug
         print("[Time:" + str(get_event_loop().time()) +
@@ -239,10 +240,10 @@ class HIDRACommunity(Community):
             # Update storage
             if k not in self.peers:
                 p = HIDRAPeer()
-                p.resource_replies[sender_id] = v["peer_info"]
+                p.resource_replies[sender_id] = v
                 self.peers[k] = p
             else:
-                self.peers[k].resource_replies[sender_id] = v["peer_info"]
+                self.peers[k].resource_replies[sender_id] = v
 
             # Select peer info from resource replies
             peer_info = self.select_peer_info(self.peers[k].resource_replies)
@@ -281,36 +282,59 @@ class HIDRACommunity(Community):
     def process_new_event_message(self, sender, payload) -> None:
         sender_id = get_peer_id(sender)
         peer = self.peers[sender_id]
-        deposit = payload.event_info["t_exec_value"] * payload.event_info["p_ratio_value"]
+        deposit = payload.event_info.t_exec_value * payload.event_info.p_ratio_value
+        event_id = get_object_id(sender_id, payload.sn_e)
 
         # Requirements
         if payload.sn_e != peer.peer_info.sn_e:
             print("INFO ---> Missing past offloading events for Peer:" + sender_id)
             return
         if deposit > self.get_available_balance(peer):
-            print("INFO ---> Peer:" + sender_id + " does not have enough balance")
+            print("INFO ---> Peer:" + sender_id + " does not have enough balance for Event:" + str(payload.sn_e))
             return
 
         # Update storage
         peer.peer_info.sn_e += 1
         peer.deposits[payload.sn_e] = deposit
-
-        # Payload data
+        self.events[event_id] = HIDRAEvent(payload.event_info, payload.domain_id)
+        self.events[event_id].solver_id = payload.solver_id
 
         # Format and sign event data
-        data = str(sender_id) + ":" + \
+        data = sender_id + ":" + \
+               str(payload.sn_e) + ":" + \
                str(payload.domain_id) + ":" + \
-               str(payload.solver_id) + ":" + \
-               str(reputation_offer)
+               payload.solver_id + ":" + \
+               str(payload.event_info)
         signature = sign_data(self.my_peer.key, data)
 
         # Debug
+        print("[Time:" + str(get_event_loop().time()) +
+              "][Domain:" + str(self.parent_domain_id) +
+              "][Peer:" + self.my_peer_id +
+              "] Sending EventReply ---> " +
+              " Peer:" + sender_id +
+              ", Event:" + str(payload.sn_e) +
+              ", Deposit:" + str(deposit) +
+              ", Timeout:" + str(payload.event_info.ts_start))
 
         # Parent domain sends EventReply messages to the Applicant
-        self.ez_send(sender, EventReplyPayload(payload.sn_e))
+        self.ez_send(sender, EventReplyPayload(payload.sn_e, signature))
 
     def process_event_reply_message(self, sender, payload) -> None:
-        pass
+        sender_id = get_peer_id(sender)
+        event = self.events[get_object_id(self.my_peer_id, payload.sn_e)]
+
+        # Requirements
+        data = self.my_peer_id + ":" + \
+               str(payload.sn_e) + ":" + \
+               str(event.domain_id) + ":" + \
+               event.solver_id + ":" + \
+               str(event.event_info)
+        if not verify_sign(sender.public_key, data, payload.signature):
+            print("INFO ---> Peer:" + sender_id + " sent an invalid signature of Event:" + str(payload.sn_e))
+            return
+
+        #
 
     def process_event_commit_message(self, sender, payload) -> None:
         pass
@@ -334,7 +358,8 @@ class HIDRACommunity(Community):
     @staticmethod
     def select_peer_info(resource_replies: dict) -> HIDRAPeerInfo:
         # Count equal resource replies
-        counter = Counter(json.dumps(v) for v in resource_replies.values()).most_common(1)
+        rr = (json.dumps(v, default=lambda o: o.__dict__).encode("utf-8") for v in resource_replies.values())
+        counter = Counter(rr).most_common(1)
 
         # f + 1 equal resource replies?
         if counter[0][1] == SimulationSettings.faulty_peers + 1:

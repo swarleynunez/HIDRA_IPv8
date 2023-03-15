@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from pyipv8.ipv8.messaging.payload_dataclass import overwrite_dataclass
 
-from hidra.types import HIDRAEventInfo, HIDRAPeerInfo
+from hidra.types import HIDRAEventInfo, HIDRAPeerInfo, HIDRAWorkload
 
 # Enhance normal dataclasses for IPv8
 dataclass = overwrite_dataclass(dataclass)
@@ -40,7 +40,7 @@ class RequestResourceInfoPayload:
 
     @classmethod
     def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
-        return json.loads(serialized_obj.decode("utf-8"))
+        return HIDRAEventInfo(**json.loads(serialized_obj.decode("utf-8")))
 
 
 @dataclass(msg_id=RESOURCE_INFO)
@@ -59,7 +59,10 @@ class ResourceInfoPayload:
 
     @classmethod
     def fix_unpack_resource_replies(cls, serialized_obj: bytes) -> [HIDRAPeerInfo]:
-        return json.loads(serialized_obj.decode("utf-8"))
+        d = json.loads(serialized_obj.decode("utf-8"))
+        for k, v in d.items():
+            d[k] = HIDRAPeerInfo(**v)
+        return d
 
 
 @dataclass(msg_id=NEW_EVENT)
@@ -69,7 +72,7 @@ class NewEventPayload:
     """
 
     sn_e: int
-    domain_id: str
+    domain_id: int
     solver_id: str
     event_info: bytes
 
@@ -79,7 +82,10 @@ class NewEventPayload:
 
     @classmethod
     def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
-        return json.loads(serialized_obj.decode("utf-8"))
+        d = json.loads(serialized_obj.decode("utf-8"))
+        event_info = HIDRAEventInfo(**d)
+        event_info.workload = HIDRAWorkload(**d["workload"])
+        return event_info
 
 
 @dataclass(msg_id=EVENT_REPLY)

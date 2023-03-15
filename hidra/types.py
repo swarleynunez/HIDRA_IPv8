@@ -18,6 +18,12 @@ class HIDRAPeerInfo:
         self.r_max = r_max
         self.r_free = r_free
 
+    def __str__(self):
+        return str(self.sn_e) + ":" + \
+            str(self.balance) + ":" + \
+            str(self.r_max) + ":" + \
+            str(self.r_free)
+
 
 class HIDRAPeer:
     """
@@ -40,6 +46,11 @@ class HIDRAWorkload:
         self.resource_limit = resource_limit
         self.port = port
 
+    def __str__(self):
+        return self.image + ":" + \
+            str(self.resource_limit) + ":" + \
+            str(self.port)
+
 
 class HIDRAEventInfo:
     """
@@ -53,6 +64,12 @@ class HIDRAEventInfo:
         self.p_ratio_value = p_ratio_value
         # self.p_ratio_unit = TimeUnit.S.value
         self.ts_start = ts_start
+
+    def __str__(self):
+        return str(self.workload) + ":" + \
+            str(self.t_exec_value) + ":" + \
+            str(self.p_ratio_value) + ":" + \
+            str(self.ts_start)
 
 
 class HIDRAEvent:
