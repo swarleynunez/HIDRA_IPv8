@@ -8,15 +8,17 @@ from collections import Counter
 from bami.settings import SimulationSettings
 from hidra.caches import HIDRANumberCache
 from hidra.payload import REQUEST_RESOURCE_INFO, RESOURCE_INFO, RequestResourceInfoPayload, ResourceInfoPayload, \
-    NewEventPayload, NEW_EVENT, EVENT_REPLY, EVENT_COMMIT, EventReplyPayload, EventCommitPayload
+    NewEventPayload, NEW_EVENT, EVENT_REPLY, EVENT_COMMIT, EventReplyPayload, EventCommitPayload, NEW_RESERVATION, \
+    RESERVATION_REPLY, RESERVATION_COMMIT, NewReservationPayload, ReservationReplyPayload, ReservationCommitPayload
 from hidra.settings import HIDRASettings
 from hidra.types import HIDRAPeerInfo, IPv8PendingMessage, HIDRAEventInfo, HIDRAWorkload, HIDRAPeer, HIDRAEvent
 from hidra.utils import get_peer_id, get_object_id, sign_data, verify_sign
 from pyipv8.ipv8.community import Community
 from pyipv8.ipv8.lazy_community import lazy_wrapper
+from pyipv8.ipv8.peer import Peer
 from pyipv8.ipv8.requestcache import RequestCache
 
-# Cache prefixes
+# TODO. Cache prefixes
 EVENT_PREFIX = "HIDRA_events"
 MESSAGES_PREFIX = "IPv8_messages"
 
@@ -47,11 +49,11 @@ class HIDRACommunity(Community):
         self.next_sn_e = 0
         self.events = {}
 
-        # IPv8 Messages
+        # TODO. IPv8 Messages
         self.messages = {}
         self.message_sn = 0
 
-        # Overlay cache
+        # TODO. Overlay cache
         self.cache = RequestCache()
 
         # Debug
@@ -65,6 +67,9 @@ class HIDRACommunity(Community):
         self.add_message_handler(NEW_EVENT, self.on_new_event)
         self.add_message_handler(EVENT_REPLY, self.on_event_reply)
         self.add_message_handler(EVENT_COMMIT, self.on_event_commit)
+        self.add_message_handler(NEW_RESERVATION, self.on_new_reservation)
+        self.add_message_handler(RESERVATION_REPLY, self.on_reservation_reply)
+        self.add_message_handler(RESERVATION_COMMIT, self.on_reservation_commit)
 
     ########
     # Peer #
@@ -179,6 +184,18 @@ class HIDRACommunity(Community):
     def on_event_commit(self, sender, payload) -> None:
         self.process_event_commit_message(sender, payload)
 
+    @lazy_wrapper(NewReservationPayload)
+    def on_new_reservation(self, sender, payload) -> None:
+        self.process_new_reservation_message(sender, payload)
+
+    @lazy_wrapper(ReservationReplyPayload)
+    def on_reservation_reply(self, sender, payload) -> None:
+        self.process_reservation_reply_message(sender, payload)
+
+    @lazy_wrapper(ReservationCommitPayload)
+    def on_reservation_commit(self, sender, payload) -> None:
+        self.process_reservation_commit_message(sender, payload)
+
     #########
     # Tasks #
     #########
@@ -267,13 +284,14 @@ class HIDRACommunity(Community):
         event.solver_id = solver_id
 
         # Debug
-        print("[Time:" + str(get_event_loop().time()) +
+        print("\n[Time:" + str(get_event_loop().time()) +
               "][Domain:" + str(self.parent_domain_id) +
               "][Peer:" + self.my_peer_id +
               "] Sending NewEvent ---> " +
               "Domain:" + str(self.parent_domain_id) +
               ", Event:" + str(sn_e) +
-              ", Solver:" + str(solver_id))
+              ", Solver:" + str(solver_id) +
+              ", Timeout:" + str(event.event_info.ts_start))
 
         # Applicant sends NewEvent messages to its parent domain
         for peer in self.domains[self.parent_domain_id]:
@@ -296,13 +314,13 @@ class HIDRACommunity(Community):
         # Update storage
         peer.peer_info.sn_e += 1
         peer.deposits[payload.sn_e] = deposit
-        self.events[event_id] = HIDRAEvent(payload.event_info, payload.domain_id)
+        self.events[event_id] = HIDRAEvent(payload.event_info, payload.to_domain_id)
         self.events[event_id].solver_id = payload.solver_id
 
         # Format and sign event data
         data = sender_id + ":" + \
                str(payload.sn_e) + ":" + \
-               str(payload.domain_id) + ":" + \
+               str(payload.to_domain_id) + ":" + \
                payload.solver_id + ":" + \
                str(payload.event_info)
         signature = sign_data(self.my_peer.key, data)
@@ -314,8 +332,7 @@ class HIDRACommunity(Community):
               "] Sending EventReply ---> " +
               " Peer:" + sender_id +
               ", Event:" + str(payload.sn_e) +
-              ", Deposit:" + str(deposit) +
-              ", Timeout:" + str(payload.event_info.ts_start))
+              ", Deposit:" + str(deposit))
 
         # Parent domain sends EventReply messages to the Applicant
         self.ez_send(sender, EventReplyPayload(payload.sn_e, signature))
@@ -325,6 +342,9 @@ class HIDRACommunity(Community):
         event = self.events[get_object_id(self.my_peer_id, payload.sn_e)]
 
         # Requirements
+        if len(event.locking_qc) == self.required_replies_for_quorum():
+            # Dismiss the message...
+            return
         data = self.my_peer_id + ":" + \
                str(payload.sn_e) + ":" + \
                str(event.domain_id) + ":" + \
@@ -334,14 +354,60 @@ class HIDRACommunity(Community):
             print("INFO ---> Peer:" + sender_id + " sent an invalid signature of Event:" + str(payload.sn_e))
             return
 
-        #
+        # Update storage
+        event.locking_qc[sender_id] = str(payload.signature, "latin1")  # Due to JSON bytes serialization
+
+        # Received required replies?
+        if len(event.locking_qc) == self.required_replies_for_quorum():
+            peer = self.get_peer_from_id(event.domain_id, event.solver_id)
+            if peer:
+                # Debug
+                print("[Time:" + str(get_event_loop().time()) +
+                      "][Domain:" + str(self.parent_domain_id) +
+                      "][Peer:" + self.my_peer_id +
+                      "] Sending NewCommit ---> " +
+                      "Domain:" + str(event.domain_id) +
+                      ", Peer:" + event.solver_id +
+                      ", Event:" + str(payload.sn_e))
+
+                # Applicant sends NewCommit message to the Solver
+                self.ez_send(peer, EventCommitPayload(payload.sn_e,
+                                                      event.domain_id,
+                                                      event.event_info,
+                                                      event.locking_qc))
+            else:
+                print("INFO ---> Peer:" + event.solver_id + " not in Domain:" + str(event.domain_id))
 
     def process_event_commit_message(self, sender, payload) -> None:
+        sender_id = get_peer_id(sender)
+
+        # Requirements
+        if len(payload.locking_qc) != self.required_replies_for_quorum():
+            print("INFO ---> Invalid locking quorum certificate for Event:" + str(payload.sn_e))
+            return
+        for k, v in payload.locking_qc.items():
+            data = sender_id + ":" + \
+                   str(payload.sn_e) + ":" + \
+                   str(self.parent_domain_id) + ":" + \
+                   self.my_peer_id + ":" + \
+                   str(payload.event_info)
+            if not verify_sign(self.get_peer_from_id(payload.from_domain_id, k).public_key, data, bytes(v, "latin1")):
+                print("INFO ---> Invalid locking quorum certificate for Event:" + str(payload.sn_e))
+                return
+
+        # Update storage
+
+    def process_new_reservation_message(self, sender, payload) -> None:
+        pass
+
+    def process_reservation_reply_message(self, sender, payload) -> None:
+        pass
+
+    def process_reservation_commit_message(self, sender, payload) -> None:
         pass
 
     def wep(self, sn_e):
         pass
-        # print(get_event_loop().time())
 
     #########
     # Utils #
@@ -355,17 +421,14 @@ class HIDRACommunity(Community):
         else:
             return self.parent_domain_id
 
-    @staticmethod
-    def select_peer_info(resource_replies: dict) -> HIDRAPeerInfo:
+    def select_peer_info(self, resource_replies: dict) -> HIDRAPeerInfo:
         # Count equal resource replies
         rr = (json.dumps(v, default=lambda o: o.__dict__).encode("utf-8") for v in resource_replies.values())
         counter = Counter(rr).most_common(1)
 
         # f + 1 equal resource replies?
-        if counter[0][1] == SimulationSettings.faulty_peers + 1:
+        if counter[0][1] == self.required_replies_for_proof():
             return HIDRAPeerInfo(**json.loads(counter[0][0]))
-        else:
-            return None
 
     @staticmethod
     def get_available_balance(peer: HIDRAPeer) -> int:
@@ -375,3 +438,24 @@ class HIDRACommunity(Community):
             deposited += v
 
         return peer.peer_info.balance - deposited
+
+    @staticmethod
+    def required_replies_for_quorum() -> int:
+        """
+        Number of required replies to get a quorum certificate on a message
+        """
+
+        return 2 * SimulationSettings.faulty_peers + 1
+
+    @staticmethod
+    def required_replies_for_proof() -> int:
+        """
+        Number of required replies to prove a message or quorum certificate
+        """
+
+        return SimulationSettings.faulty_peers + 1
+
+    def get_peer_from_id(self, domain_id, peer_id) -> Peer:
+        for peer in self.domains[domain_id]:
+            if get_peer_id(peer) == peer_id:
+                return peer

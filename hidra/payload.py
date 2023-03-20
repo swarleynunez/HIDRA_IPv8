@@ -20,7 +20,7 @@ EVENT_COMMIT = 5
 # WEP Identifiers
 NEW_RESERVATION = 6
 RESERVATION_REPLY = 7
-RESERVATION_COMMIT_1 = 8
+RESERVATION_COMMIT = 8
 RESERVATION_COMMIT_2 = 9
 RESERVATION_COMMIT_3 = 10
 
@@ -72,7 +72,7 @@ class NewEventPayload:
     """
 
     sn_e: int
-    domain_id: int
+    to_domain_id: int
     solver_id: str
     event_info: bytes
 
@@ -102,6 +102,55 @@ class EventReplyPayload:
 class EventCommitPayload:
     """
     Payload for HIDRA's 'EventCommit' messages
+    """
+
+    sn_e: int
+    from_domain_id: int
+    event_info: bytes
+    locking_qc: bytes
+
+    @staticmethod
+    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
+        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
+        d = json.loads(serialized_obj.decode("utf-8"))
+        event_info = HIDRAEventInfo(**d)
+        event_info.workload = HIDRAWorkload(**d["workload"])
+        return event_info
+
+    @staticmethod
+    def fix_pack_locking_qc(dictionary: dict) -> bytes:
+        return json.dumps(dictionary).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_locking_qc(cls, serialized_dictionary: bytes) -> dict:
+        return json.loads(serialized_dictionary.decode("utf-8"))
+
+
+@dataclass(msg_id=NEW_RESERVATION)
+class NewReservationPayload:
+    """
+    Payload for HIDRA's 'NewReservation' messages
+    """
+
+    sn_e: int
+
+
+@dataclass(msg_id=RESERVATION_REPLY)
+class ReservationReplyPayload:
+    """
+    Payload for HIDRA's 'ReservationReply' messages
+    """
+
+    sn_e: int
+
+
+@dataclass(msg_id=RESERVATION_COMMIT)
+class ReservationCommitPayload:
+    """
+    Payload for HIDRA's 'ReservationCommit' messages
     """
 
     sn_e: int

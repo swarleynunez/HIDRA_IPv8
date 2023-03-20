@@ -82,6 +82,8 @@ class HIDRAEvent:
         self.domain_id = domain_id
         self.solver_id = None
         self.available_peers = []
+        self.locking_qc = {}  # Quorum certificate
+        self.reservation_qc = {}  # Quorum certificate
 
 
 class IPv8PendingMessage:
