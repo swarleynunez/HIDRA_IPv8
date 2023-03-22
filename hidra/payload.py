@@ -8,21 +8,29 @@ from hidra.types import HIDRAEventInfo, HIDRAPeerInfo, HIDRAWorkload
 # Enhance normal dataclasses for IPv8
 dataclass = overwrite_dataclass(dataclass)
 
-# SSP Identifiers
+# SSP identifiers
 REQUEST_RESOURCE_INFO = 1
 RESOURCE_INFO = 2
 
-# WRP Identifiers
+# WRP identifiers
+# Balance locking
 NEW_EVENT = 3
 EVENT_REPLY = 4
 EVENT_COMMIT = 5
 
-# WEP Identifiers
+# Resource reservation
 NEW_RESERVATION = 6
 RESERVATION_REPLY = 7
 RESERVATION_COMMIT = 8
-RESERVATION_COMMIT_2 = 9
-RESERVATION_COMMIT_3 = 10
+
+# Reservation QC dissemination (event cancellation)
+RESERVATION_QC_SEND = 9
+RESERVATION_QC_ECHO = 10
+RESERVATION_QC_REPLY = 11
+FINAL_DECISION = 12
+
+
+# WEP identifiers
 
 
 @dataclass(msg_id=REQUEST_RESOURCE_INFO)
@@ -73,7 +81,7 @@ class NewEventPayload:
 
     sn_e: int
     to_domain_id: int
-    solver_id: str
+    to_solver_id: str
     event_info: bytes
 
     @staticmethod
@@ -105,7 +113,6 @@ class EventCommitPayload:
     """
 
     sn_e: int
-    from_domain_id: int
     event_info: bytes
     locking_qc: bytes
 
@@ -135,7 +142,30 @@ class NewReservationPayload:
     Payload for HIDRA's 'NewReservation' messages
     """
 
+    applicant_id: str
     sn_e: int
+    sn_r: int
+    event_info: bytes
+    locking_qc: bytes
+
+    @staticmethod
+    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
+        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
+        d = json.loads(serialized_obj.decode("utf-8"))
+        event_info = HIDRAEventInfo(**d)
+        event_info.workload = HIDRAWorkload(**d["workload"])
+        return event_info
+
+    @staticmethod
+    def fix_pack_locking_qc(dictionary: dict) -> bytes:
+        return json.dumps(dictionary).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_locking_qc(cls, serialized_dictionary: bytes) -> dict:
+        return json.loads(serialized_dictionary.decode("utf-8"))
 
 
 @dataclass(msg_id=RESERVATION_REPLY)
@@ -144,7 +174,9 @@ class ReservationReplyPayload:
     Payload for HIDRA's 'ReservationReply' messages
     """
 
+    applicant_id: str
     sn_e: int
+    signature: bytes
 
 
 @dataclass(msg_id=RESERVATION_COMMIT)
@@ -154,3 +186,13 @@ class ReservationCommitPayload:
     """
 
     sn_e: int
+    sn_r: int
+    reservation_qc: bytes
+
+    @staticmethod
+    def fix_pack_reservation_qc(dictionary: dict) -> bytes:
+        return json.dumps(dictionary).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_reservation_qc(cls, serialized_dictionary: bytes) -> dict:
+        return json.loads(serialized_dictionary.decode("utf-8"))

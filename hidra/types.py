@@ -12,17 +12,19 @@ class HIDRAPeerInfo:
     HIDRA peer (shared information)
     """
 
-    def __init__(self, sn_e: int, balance: int, r_max: int, r_free: int):
-        self.sn_e = sn_e
+    def __init__(self, balance: int, r_max: int, r_free: int, sn_e: int, sn_r: int):
         self.balance = balance
         self.r_max = r_max
         self.r_free = r_free
+        self.sn_e = sn_e
+        self.sn_r = sn_r
 
     def __str__(self):
-        return str(self.sn_e) + ":" + \
-            str(self.balance) + ":" + \
+        return str(self.balance) + ":" + \
             str(self.r_max) + ":" + \
-            str(self.r_free)
+            str(self.r_free) + ":" + \
+            str(self.sn_e) + ":" + \
+            str(self.sn_r)
 
 
 class HIDRAPeer:
@@ -34,6 +36,7 @@ class HIDRAPeer:
         self.peer_info: HIDRAPeerInfo = None
         self.resource_replies = {}
         self.deposits = {}
+        self.reservations = {}
 
 
 class HIDRAWorkload:
@@ -77,12 +80,13 @@ class HIDRAEvent:
     HIDRA offloading event (local information)
     """
 
-    def __init__(self, event_info: HIDRAEventInfo, domain_id: int):
+    def __init__(self, event_info: HIDRAEventInfo, to_domain_id: int):
         self.event_info = event_info
-        self.domain_id = domain_id
-        self.solver_id = None
+        self.to_domain_id = to_domain_id
+        self.to_solver_id = None
         self.available_peers = []
         self.locking_qc = {}  # Quorum certificate
+        self.sn_r = 0
         self.reservation_qc = {}  # Quorum certificate
 
 
