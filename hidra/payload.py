@@ -8,25 +8,24 @@ from hidra.types import HIDRAEventInfo, HIDRAPeerInfo, HIDRAWorkload
 # Enhance normal dataclasses for IPv8
 dataclass = overwrite_dataclass(dataclass)
 
-# SSP identifiers
+# SSP
 REQUEST_RESOURCE_INFO = 1
 RESOURCE_INFO = 2
 
-# WRP identifiers
-# Balance locking
+# WRP: balance locking
 NEW_EVENT = 3
 EVENT_REPLY = 4
 EVENT_COMMIT = 5
 
-# Resource reservation
+# WRP: resource reservation
 NEW_RESERVATION = 6
 RESERVATION_REPLY = 7
 RESERVATION_COMMIT = 8
 
-# Reservation QC dissemination (event cancellation)
+# WRP: reservation QC dissemination (enabling event cancellation)
 RESERVATION_QC_SEND = 9
 RESERVATION_QC_ECHO = 10
-RESERVATION_QC_REPLY = 11
+RESERVATION_QC_READY = 11
 FINAL_DECISION = 12
 
 
@@ -187,6 +186,63 @@ class ReservationCommitPayload:
 
     sn_e: int
     sn_r: int
+    reservation_qc: bytes
+
+    @staticmethod
+    def fix_pack_reservation_qc(dictionary: dict) -> bytes:
+        return json.dumps(dictionary).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_reservation_qc(cls, serialized_dictionary: bytes) -> dict:
+        return json.loads(serialized_dictionary.decode("utf-8"))
+
+
+@dataclass(msg_id=RESERVATION_QC_SEND)
+class ReservationQCSendPayload:
+    """
+    Payload for HIDRA's 'ReservationQCSend' messages
+    """
+
+    sn_e: int
+    sn_r: int
+    reservation_qc: bytes
+
+    @staticmethod
+    def fix_pack_reservation_qc(dictionary: dict) -> bytes:
+        return json.dumps(dictionary).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_reservation_qc(cls, serialized_dictionary: bytes) -> dict:
+        return json.loads(serialized_dictionary.decode("utf-8"))
+
+
+@dataclass(msg_id=RESERVATION_QC_ECHO)
+class ReservationQCEchoPayload:
+    """
+    Payload for HIDRA's 'ReservationQCEcho' messages
+    """
+
+    applicant_id: str
+    sn_e: int
+    reservation_qc: bytes
+
+    @staticmethod
+    def fix_pack_reservation_qc(dictionary: dict) -> bytes:
+        return json.dumps(dictionary).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_reservation_qc(cls, serialized_dictionary: bytes) -> dict:
+        return json.loads(serialized_dictionary.decode("utf-8"))
+
+
+@dataclass(msg_id=RESERVATION_QC_READY)
+class ReservationQCReadyPayload:
+    """
+    Payload for HIDRA's 'ReservationQCReady' messages
+    """
+
+    applicant_id: str
+    sn_e: int
     reservation_qc: bytes
 
     @staticmethod

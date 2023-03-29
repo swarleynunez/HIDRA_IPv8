@@ -81,20 +81,16 @@ class HIDRAEvent:
     """
 
     def __init__(self, event_info: HIDRAEventInfo, to_domain_id: int):
+        # Global info
         self.event_info = event_info
         self.to_domain_id = to_domain_id
         self.to_solver_id = None
-        self.available_peers = []
         self.locking_qc = {}  # Quorum certificate
-        self.sn_r = 0
         self.reservation_qc = {}  # Quorum certificate
 
-
-class IPv8PendingMessage:
-    """
-    IPv8 messages pending to be delivered
-    """
-
-    def __init__(self, sender: Peer, payload: Any):
-        self.sender = sender
-        self.payload = payload
+        # Local info
+        self.available_peers = []
+        self.sn_r = 0
+        self.sent_echo = False
+        self.reservation_qc_echos = {}
+        self.reservation_qc_readys = {}
