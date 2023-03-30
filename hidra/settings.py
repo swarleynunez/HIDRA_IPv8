@@ -21,8 +21,8 @@ class HIDRASettings:
     # Timeout for resource replies to select Solvers
     ssp_timeout = 5
 
-    # Timeout to start the monitoring process of a workload
-    wrp_timeout = 5
+    # Timestamp when the monitoring process of a workload starts
+    wrp_start_timestamp = 5
 
     # TODO
     # Number of containers initially executed by each peer

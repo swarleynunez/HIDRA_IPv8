@@ -1,7 +1,4 @@
 from enum import Enum
-from typing import Any
-
-from pyipv8.ipv8.peer import Peer
 
 # Enumerations (SECONDS, MINUTES, HOURS, WEEKS)
 TimeUnit = Enum('TimeUnit', ['S', 'M', 'H', 'W'])
@@ -81,16 +78,15 @@ class HIDRAEvent:
     """
 
     def __init__(self, event_info: HIDRAEventInfo, to_domain_id: int):
-        # Global info
+        # Shared info
         self.event_info = event_info
         self.to_domain_id = to_domain_id
         self.to_solver_id = None
-        self.locking_qc = {}  # Quorum certificate
-        self.reservation_qc = {}  # Quorum certificate
 
         # Local info
         self.available_peers = []
         self.sn_r = 0
-        self.sent_echo = False
-        self.reservation_qc_echos = {}
-        self.reservation_qc_readys = {}
+        self.locking_echos = {}
+        self.locking_readys = {}
+        self.reservation_echos = {}
+        self.reservation_readys = {}
