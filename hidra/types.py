@@ -1,4 +1,7 @@
 from enum import Enum
+from typing import Any
+
+from pyipv8.ipv8.peer import Peer
 
 # Enumerations (SECONDS, MINUTES, HOURS, WEEKS)
 TimeUnit = Enum('TimeUnit', ['S', 'M', 'H', 'W'])
@@ -85,8 +88,19 @@ class HIDRAEvent:
 
         # Local info
         self.available_peers = []
-        self.sn_r = 0
+        self.sent_echo = False
         self.locking_echos = {}
         self.locking_readys = {}
+        self.sn_r = 0
         self.reservation_echos = {}
         self.reservation_readys = {}
+
+
+class IPv8PendingMessage:
+    """
+    IPv8 messages pending to be delivered
+    """
+
+    def __init__(self, sender: Peer, payload: Any):
+        self.sender = sender
+        self.payload = payload

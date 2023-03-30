@@ -96,8 +96,10 @@ class LockingEchoPayload:
     Payload for HIDRA's 'LockingEcho' messages
     """
 
-    applicant_id: int
+    applicant_id: str
     sn_e: int
+    to_domain_id: int
+    to_solver_id: str
     event_info: bytes
 
     @staticmethod
@@ -118,7 +120,10 @@ class LockingReadyPayload:
     Payload for HIDRA's 'LockingReady' messages
     """
 
+    applicant_id: str
     sn_e: int
+    to_domain_id: int
+    to_solver_id: str
     event_info: bytes
 
     @staticmethod

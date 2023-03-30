@@ -1,4 +1,3 @@
-import json
 from hashlib import sha1
 
 from pyipv8.ipv8.keyvault.crypto import default_eccrypto
@@ -27,5 +26,5 @@ def verify_sign(public_key: PublicKey, data: str, signature: bytes) -> bool:
     return default_eccrypto.is_valid_signature(public_key, data_hash, signature)
 
 
-def hash_dict(dictionary: dict) -> str:
-    return sha1(json.dumps(dictionary).encode("utf-8")).digest()
+def hash_data(data: str) -> str:
+    return sha1(data.encode("utf-8")).digest()

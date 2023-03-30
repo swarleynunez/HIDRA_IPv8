@@ -12,8 +12,8 @@ from hidra.payload import REQUEST_RESOURCE_INFO, RESOURCE_INFO, RequestResourceI
     RESERVATION_READY, RESERVATION_CREDIT, NewReservationPayload, ReservationReplyPayload, ReservationCommitPayload, \
     LOCKING_CREDIT, RESERVATION_DENY, LockingReadyPayload
 from hidra.settings import HIDRASettings
-from hidra.types import HIDRAPeerInfo, HIDRAEventInfo, HIDRAWorkload, HIDRAPeer, HIDRAEvent
-from hidra.utils import get_peer_id, get_object_id, sign_data, verify_sign, hash_dict
+from hidra.types import HIDRAPeerInfo, HIDRAEventInfo, HIDRAWorkload, HIDRAPeer, HIDRAEvent, IPv8PendingMessage
+from hidra.utils import get_peer_id, get_object_id, sign_data, verify_sign, hash_data
 from pyipv8.ipv8.community import Community
 from pyipv8.ipv8.lazy_community import lazy_wrapper
 from pyipv8.ipv8.peer import Peer
@@ -43,10 +43,14 @@ class HIDRACommunity(Community):
         # Events
         self.events = {}
 
+        # IPv8 Messages
+        self.messages = {}
+
         # Counters
         self.next_sn_d = 0
         self.next_sn_e = 0
         self.next_sn_r = 0
+        self.next_sn_m = 0
 
         # Debug
         global APPLICANT
@@ -129,188 +133,46 @@ class HIDRACommunity(Community):
             self.domains[self.next_sn_d] = domain_peers
             self.next_sn_d += 1
 
-    # APPLICANT
-    def ssp(self, sn_e) -> None:
-        # Payload data
-        workload = HIDRAWorkload("nginx", 1024, 8888)
-        event_info = HIDRAEventInfo(workload, 1800, 1, int(time.time()) + 180)
+    def add_pending_message(self, sender, payload) -> None:
+        # Get the next message ID
+        message_id = get_object_id(self.my_peer_id, self.next_sn_m)
+        self.next_sn_m += 1
 
-        # Select a domain
-        to_domain_id = self.select_domain()
+        # Update storage and cache
+        self.messages[message_id] = IPv8PendingMessage(sender, payload)
 
-        # Update storage
-        self.events[get_object_id(self.my_peer_id, sn_e)] = HIDRAEvent(event_info, to_domain_id)
+    def process_pending_messages(self):
+        for k, v in list(self.messages.items()):
+            # Update storage and cache
+            self.messages.pop(k)
 
-        # Debug
-        print("[Time:" + format(get_event_loop().time(), ".3f") +
-              "][Domain:" + str(self.parent_domain_id) +
-              "][Peer:" + self.my_peer_id +
-              "] Sending RequestResourceInfo ---> " +
-              "Domain:" + str(to_domain_id) +
-              ", Event:" + str(sn_e))
-
-        # Applicant sends RequestResourceInfo messages to the selected domain
-        for peer in self.domains[to_domain_id]:
-            self.ez_send(peer, RequestResourceInfoPayload(sn_e, event_info))
-
-    # APPLICANT
-    def wrp(self, sn_e):
-        event = self.events[get_object_id(self.my_peer_id, sn_e)]
-
-        # Requirements
-        if len(event.available_peers) == 0:
-            # TODO. Select another domain
-            print("INFO ---> Domain:" + str(event.to_domain_id) + " not available for Event:" + str(sn_e))
-            return
-
-        # Payload data
-        to_solver_id = random.choice(event.available_peers)
-
-        # Update storage
-        event.to_solver_id = to_solver_id
-
-        # Debug
-        print("\n[Time:" + format(get_event_loop().time(), ".3f") +
-              "][Domain:" + str(self.parent_domain_id) +
-              "][Peer:" + self.my_peer_id +
-              "] Sending LockingSend ---> " +
-              "Domain:" + str(self.parent_domain_id) +
-              ", Event:" + str(sn_e) +
-              ", Solver:" + str(to_solver_id) +
-              ", Timeout:" + str(event.event_info.ts_start))
-
-        # Applicant sends LockingSend messages to its parent domain
-        for peer in self.domains[self.parent_domain_id]:
-            self.ez_send(peer, LockingSendPayload(sn_e, event.to_domain_id, to_solver_id, event.event_info))
-
-    # APPLICANT PARENT DOMAIN
-    def wep(self, sn_e):
-        # peer.peer_info.sn_e += 1
-        # peer.peer_info.sn_r += 1
-        pass
+            if v.payload.msg_id == LOCKING_ECHO:
+                # Process pending 'LockingEcho' message
+                self.process_locking_echo_message(v.sender, v.payload)
 
     #############
     # Callbacks #
     #############
-    # SELECTED DOMAIN
     @lazy_wrapper(RequestResourceInfoPayload)
     def on_request_resource_info(self, sender, payload) -> None:
-        sender_id = get_peer_id(sender)
+        self.process_request_resource_info_message(sender, payload)
 
-        # Payload data
-        # TODO. Check event info to make a decision
-        available = random.choice([True, False])
-        domain_info = {}
-        for peer in self.domains[self.parent_domain_id]:
-            peer_id = get_peer_id(peer)
-            domain_info[peer_id] = self.peers[peer_id].peer_info
-
-        # Debug
-        print("[Time:" + format(get_event_loop().time(), ".3f") +
-              "][Domain:" + str(self.parent_domain_id) +
-              "][Peer:" + self.my_peer_id +
-              "] Sending ResourceInfo --->" +
-              " Peer:" + sender_id +
-              ", Event:" + str(payload.sn_e) +
-              ", Available:" + ("T" if available else "F"))
-
-        # Selected domain sends ResourceInfo messages to the Applicant
-        self.ez_send(sender, ResourceInfoPayload(payload.sn_e, available, domain_info))
-
-    # APPLICANT
     @lazy_wrapper(ResourceInfoPayload)
     def on_resource_info(self, sender, payload) -> None:
-        sender_id = get_peer_id(sender)
+        self.process_resource_info_message(sender, payload)
 
-        # Is the sender peer available to manage the offloading event?
-        if payload.available:
-            self.events[get_object_id(self.my_peer_id, payload.sn_e)].available_peers.append(sender_id)
-
-        # Deliver resource replies
-        for k, v in payload.resource_replies.items():
-            # Update storage
-            self.peers[k].resource_replies[sender_id] = v
-
-            # Select peer info from resource replies
-            peer_info = self.select_peer_info(self.peers[k].resource_replies)
-            if peer_info:
-                # Update storage
-                self.peers[k].peer_info = peer_info
-
-    # APPLICANT PARENT DOMAIN
     @lazy_wrapper(LockingSendPayload)
     def on_locking_send(self, sender, payload) -> None:
-        sender_id = get_peer_id(sender)
-        peer = self.peers[sender_id]
-        deposit = payload.event_info.t_exec_value * payload.event_info.p_ratio_value
-        event_id = get_object_id(sender_id, payload.sn_e)
+        self.process_locking_send_message(sender, payload)
 
-        # Requirements
-        if event_id in self.events:
-            # Dismiss the message...
-            return
-        if payload.sn_e != peer.peer_info.sn_e:
-            print("INFO ---> Missing past events for Peer:" + sender_id)
-            return
-        if deposit > self.get_available_balance(peer):
-            print("INFO ---> Peer:" + sender_id + " does not have enough balance for Event:" + str(payload.sn_e))
-            return
-
-        # Update storage
-        peer.deposits[payload.sn_e] = deposit
-        self.events[event_id] = HIDRAEvent(payload.event_info, payload.to_domain_id)
-        self.events[event_id].to_solver_id = payload.to_solver_id
-
-        # Debug
-        print("[Time:" + format(get_event_loop().time(), ".3f") +
-              "][Domain:" + str(self.parent_domain_id) +
-              "][Peer:" + self.my_peer_id +
-              "] Sending LockingEcho ---> " +
-              " Peer:" + sender_id +
-              ", Event:" + str(payload.sn_e) +
-              ", Deposit:" + str(deposit))
-
-        # Parent domain sends LockingEcho messages to itself
-        for peer in self.domains[self.parent_domain_id]:
-            self.ez_send(peer, LockingEchoPayload(sender_id, payload.sn_e, payload.event_info))
-
-    # APPLICANT PARENT DOMAIN
     @lazy_wrapper(LockingEchoPayload)
     def on_locking_echo(self, sender, payload) -> None:
-        sender_id = get_peer_id(sender)
-        event = self.events[get_object_id(payload.applicant_id, payload.sn_e)]
-
-        # Requirements
-        if sender_id in event.locking_echos:
-            # Dismiss the message...
-            return
-        if self.has_required_replies(event.locking_echos, self.required_replies_for_quorum()):
-            # Dismiss the message...
-            return
-
-        # Payload
-
-        # Update storage
-        event.locking_echos[sender_id] = hash_dict(payload.reservation_qc)
-
-        # Required equal echos for a locking?
-        if self.has_required_replies(event.locking_echos, self.required_replies_for_quorum()):
-            # Debug
-            print("[Time:" + format(get_event_loop().time(), ".3f") +
-                  "][Domain:" + str(self.parent_domain_id) +
-                  "][Peer:" + self.my_peer_id +
-                  "] Sending ReservationQCReady ---> " +
-                  "Domain:" + str(self.parent_domain_id) +
-                  ", Event:" + str(payload.sn_e) +
-                  ", Reservation:" + str(event.sn_r))
-
-            # Applicant sends EventCommit message to the Solver
-            self.ez_send(self.get_peer_from_id(event.to_solver_id),
-                         LockingCreditPayload(payload.sn_e, event.event_info))
+        self.process_pending_messages()
+        self.process_locking_echo_message(sender, payload)
 
     @lazy_wrapper(LockingReadyPayload)
     def on_locking_ready(self, sender, payload) -> None:
-        pass
+        self.process_locking_ready_message(sender, payload)
 
     @lazy_wrapper(LockingCreditPayload)
     def on_locking_credit(self, sender, payload) -> None:
@@ -472,6 +334,223 @@ class HIDRACommunity(Community):
               ", Reservation:" + str(payload.sn_r))
 
         # Applicant sends ReservationQCSend messages to its parent domain
+
+    #########
+    # Tasks #
+    #########
+    # APPLICANT
+    def ssp(self, sn_e) -> None:
+        # Payload data
+        workload = HIDRAWorkload("nginx", 1024, 8888)
+        event_info = HIDRAEventInfo(workload, 1800, 1, int(time.time()) + 180)
+
+        # Select a domain
+        to_domain_id = self.select_domain()
+
+        # Update storage
+        self.events[get_object_id(self.my_peer_id, sn_e)] = HIDRAEvent(event_info, to_domain_id)
+
+        # Debug
+        print("SSP:"
+              "\n[Time:" + format(get_event_loop().time(), ".3f") +
+              "][Domain:" + str(self.parent_domain_id) +
+              "][Peer:" + self.my_peer_id +
+              "] Sending RequestResourceInfo ---> " +
+              "Domain:" + str(to_domain_id) +
+              ", Event:" + str(sn_e))
+
+        # Applicant sends RequestResourceInfo messages to the selected domain
+        for peer in self.domains[to_domain_id]:
+            self.ez_send(peer, RequestResourceInfoPayload(sn_e, event_info))
+
+    # SELECTED DOMAIN
+    def process_request_resource_info_message(self, sender, payload) -> None:
+        sender_id = get_peer_id(sender)
+
+        # Payload data
+        # TODO. Check event info to make a decision
+        available = random.choice([True, False])
+        domain_info = {}
+        for peer in self.domains[self.parent_domain_id]:
+            peer_id = get_peer_id(peer)
+            domain_info[peer_id] = self.peers[peer_id].peer_info
+
+        # Debug
+        print("[Time:" + format(get_event_loop().time(), ".3f") +
+              "][Domain:" + str(self.parent_domain_id) +
+              "][Peer:" + self.my_peer_id +
+              "] Sending ResourceInfo --->" +
+              " Peer:" + sender_id +
+              ", Event:" + str(payload.sn_e) +
+              ", Available:" + ("T" if available else "F"))
+
+        # Selected domain sends ResourceInfo messages to the Applicant
+        self.ez_send(sender, ResourceInfoPayload(payload.sn_e, available, domain_info))
+
+    # APPLICANT
+    def process_resource_info_message(self, sender, payload) -> None:
+        sender_id = get_peer_id(sender)
+
+        # Is the sender peer available to manage the offloading event?
+        if payload.available:
+            self.events[get_object_id(self.my_peer_id, payload.sn_e)].available_peers.append(sender_id)
+
+        # Deliver resource replies
+        for k, v in payload.resource_replies.items():
+            # Update storage
+            self.peers[k].resource_replies[sender_id] = v
+
+            # Select peer info from resource replies
+            peer_info = self.select_peer_info(self.peers[k].resource_replies)
+            if peer_info:
+                # Update storage
+                self.peers[k].peer_info = peer_info
+
+    # APPLICANT
+    def wrp(self, sn_e):
+        event = self.events[get_object_id(self.my_peer_id, sn_e)]
+
+        # Requirements
+        if len(event.available_peers) == 0:
+            # TODO. Select another domain
+            print("INFO ---> Domain:" + str(event.to_domain_id) + " not available for Event:" + str(sn_e))
+            return
+
+        # Payload data
+        to_solver_id = random.choice(event.available_peers)
+
+        # Update storage
+        event.to_solver_id = to_solver_id
+
+        # Debug
+        print("\nWRP locking:"
+              "\n[Time:" + format(get_event_loop().time(), ".3f") +
+              "][Domain:" + str(self.parent_domain_id) +
+              "][Peer:" + self.my_peer_id +
+              "] Sending LockingSend ---> " +
+              "Domain:" + str(self.parent_domain_id) +
+              ", Event:" + str(sn_e) +
+              ", Solver:" + str(to_solver_id))
+
+        # Applicant sends LockingSend messages to its parent domain
+        for peer in self.domains[self.parent_domain_id]:
+            self.ez_send(peer, LockingSendPayload(sn_e, event.to_domain_id, event.to_solver_id, event.event_info))
+
+    # APPLICANT PARENT DOMAIN
+    def process_locking_send_message(self, sender, payload) -> None:
+        sender_id = get_peer_id(sender)
+        peer = self.peers[sender_id]
+        deposit = payload.event_info.t_exec_value * payload.event_info.p_ratio_value
+        event_id = get_object_id(sender_id, payload.sn_e)
+
+        # Requirements
+        if self.exist_event(event_id) and self.events[event_id].sent_echo:
+            # Dismiss the message...
+            return
+        if payload.sn_e != peer.peer_info.sn_e:
+            print("INFO ---> Missing past events for Peer:" + sender_id)
+            return
+        if deposit > self.get_available_balance(peer):
+            print("INFO ---> Peer:" + sender_id + " does not have enough balance for Event:" + str(payload.sn_e))
+            return
+
+        # Update storage
+        peer.deposits[payload.sn_e] = deposit
+        self.events[event_id] = HIDRAEvent(payload.event_info, payload.to_domain_id)
+        self.events[event_id].to_solver_id = payload.to_solver_id
+        self.events[event_id].sent_echo = True
+
+        # Debug
+        print("[Time:" + format(get_event_loop().time(), ".3f") +
+              "][Domain:" + str(self.parent_domain_id) +
+              "][Peer:" + self.my_peer_id +
+              "] Sending LockingEcho ---> " +
+              "Domain:" + str(self.parent_domain_id) +
+              ", Event:" + str(payload.sn_e) +
+              ", Deposit:" + str(deposit))
+
+        # Applicant parent domain sends LockingEcho messages to itself
+        for peer in self.domains[self.parent_domain_id]:
+            self.ez_send(peer, LockingEchoPayload(sender_id,
+                                                  payload.sn_e,
+                                                  payload.to_domain_id,
+                                                  payload.to_solver_id,
+                                                  payload.event_info))
+
+    # APPLICANT PARENT DOMAIN
+    def process_locking_echo_message(self, sender, payload) -> None:
+        sender_id = get_peer_id(sender)
+        event_id = get_object_id(payload.applicant_id, payload.sn_e)
+
+        # Requirements
+        if not self.exist_event(event_id):
+            self.add_pending_message(sender, payload)
+            return
+        event = self.events[event_id]
+        if sender_id in event.locking_echos:
+            # Dismiss the message...
+            return
+        if self.has_required_replies(event.locking_echos, self.required_replies_for_quorum()):
+            # Dismiss the message...
+            return
+
+        # Format and hash event data
+        data = payload.applicant_id + ":" + \
+               str(payload.sn_e) + ":" + \
+               str(payload.to_domain_id) + ":" + \
+               payload.to_solver_id + ":" + \
+               str(payload.event_info)
+
+        # Update storage
+        event.locking_echos[sender_id] = hash_data(data)
+
+        # Required equal echos for a locking?
+        if self.has_required_replies(event.locking_echos, self.required_replies_for_quorum()):
+            # Debug
+            print("[Time:" + format(get_event_loop().time(), ".3f") +
+                  "][Domain:" + str(self.parent_domain_id) +
+                  "][Peer:" + self.my_peer_id +
+                  "] Sending LockingReady ---> " +
+                  "Domain:" + str(self.parent_domain_id) +
+                  ", Event:" + str(payload.sn_e))
+
+            # Applicant parent domain sends LockingReady messages to itself
+            for peer in self.domains[self.parent_domain_id]:
+                self.ez_send(peer, LockingReadyPayload(payload.applicant_id,
+                                                       payload.sn_e,
+                                                       payload.to_domain_id,
+                                                       payload.to_solver_id,
+                                                       payload.event_info))
+
+    def process_locking_ready_message(self, sender, payload) -> None:
+        pass
+
+    def process_locking_credit_message(self, sender, payload) -> None:
+        pass
+
+    def process_reservation_echo_message(self, sender, payload) -> None:
+        pass
+
+    def process_reservation_deny_message(self, sender, payload) -> None:
+        pass
+
+    def process_reservation_ready_message(self, sender, payload) -> None:
+        pass
+
+    def process_reservation_credit_message(self, sender, payload) -> None:
+        pass
+
+    # APPLICANT PARENT DOMAIN
+    def wep(self, sn_e):
+        # peer.peer_info.sn_e += 1
+        # peer.peer_info.sn_r += 1
+        pass
+
+    ############
+    # Checkers #
+    ############
+    def exist_event(self, event_id) -> bool:
+        return event_id in self.events
 
     #########
     # Utils #
