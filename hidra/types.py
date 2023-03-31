@@ -33,7 +33,7 @@ class HIDRAPeer:
     """
 
     def __init__(self):
-        self.peer_info: HIDRAPeerInfo = None
+        self.info: HIDRAPeerInfo = None
         self.resource_replies = {}
         self.deposits = {}
         self.reservations = {}
@@ -60,7 +60,10 @@ class HIDRAEventInfo:
     HIDRA offloading event (shared information)
     """
 
-    def __init__(self, workload: HIDRAWorkload, t_exec_value: int, p_ratio_value: int, ts_start: int):
+    def __init__(self, to_domain_id: int, to_solver_id: str, workload: HIDRAWorkload,
+                 t_exec_value: int, p_ratio_value: int, ts_start: int):
+        self.to_domain_id = to_domain_id
+        self.to_solver_id = to_solver_id
         self.workload = workload
         self.t_exec_value = t_exec_value
         # self.t_exec_unit = TimeUnit.S.value
@@ -69,7 +72,9 @@ class HIDRAEventInfo:
         self.ts_start = ts_start
 
     def __str__(self):
-        return str(self.workload) + ":" + \
+        return str(self.to_domain_id) + ":" + \
+            self.to_solver_id + ":" + \
+            str(self.workload) + ":" + \
             str(self.t_exec_value) + ":" + \
             str(self.p_ratio_value) + ":" + \
             str(self.ts_start)
@@ -80,18 +85,19 @@ class HIDRAEvent:
     HIDRA offloading event (local information)
     """
 
-    def __init__(self, event_info: HIDRAEventInfo, to_domain_id: int):
+    def __init__(self, info: HIDRAEventInfo):
         # Shared info
-        self.event_info = event_info
-        self.to_domain_id = to_domain_id
-        self.to_solver_id = None
+        self.info = info
 
         # Local info
         self.available_peers = []
-        self.sent_echo = False
+        self.locking_echo_sent = False
         self.locking_echos = {}
         self.locking_readys = {}
+        self.locking_credits = {}
+
         self.sn_r = 0
+        self.reservation_echo_sent = False
         self.reservation_echos = {}
         self.reservation_readys = {}
 

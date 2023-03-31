@@ -74,8 +74,6 @@ class LockingSendPayload:
     """
 
     sn_e: int
-    to_domain_id: int
-    to_solver_id: str
     event_info: bytes
 
     @staticmethod
@@ -98,8 +96,6 @@ class LockingEchoPayload:
 
     applicant_id: str
     sn_e: int
-    to_domain_id: int
-    to_solver_id: str
     event_info: bytes
 
     @staticmethod
@@ -122,8 +118,6 @@ class LockingReadyPayload:
 
     applicant_id: str
     sn_e: int
-    to_domain_id: int
-    to_solver_id: str
     event_info: bytes
 
     @staticmethod
@@ -144,6 +138,7 @@ class LockingCreditPayload:
     Payload for HIDRA's 'LockingCredit' messages
     """
 
+    applicant_id: str
     sn_e: int
     event_info: bytes
 
@@ -160,35 +155,22 @@ class LockingCreditPayload:
 
 
 @dataclass(msg_id=RESERVATION_ECHO)
-class NewReservationPayload:
+class ReservationEchoPayload:
     """
-    Payload for HIDRA's 'NewReservation' messages
+    Payload for HIDRA's 'ReservationEcho' messages
     """
 
-    applicant_id: str
     sn_e: int
     sn_r: int
-    event_info: bytes
-    locking_qc: bytes
 
-    @staticmethod
-    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
-        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
 
-    @classmethod
-    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
-        d = json.loads(serialized_obj.decode("utf-8"))
-        event_info = HIDRAEventInfo(**d)
-        event_info.workload = HIDRAWorkload(**d["workload"])
-        return event_info
+@dataclass(msg_id=RESERVATION_DENY)
+class ReservationDenyPayload:
+    """
+    Payload for HIDRA's 'ReservationDeny' messages
+    """
 
-    @staticmethod
-    def fix_pack_locking_qc(dictionary: dict) -> bytes:
-        return json.dumps(dictionary).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_locking_qc(cls, serialized_dictionary: bytes) -> dict:
-        return json.loads(serialized_dictionary.decode("utf-8"))
+    sn_e: int
 
 
 @dataclass(msg_id=RESERVATION_READY)
@@ -197,25 +179,15 @@ class ReservationReplyPayload:
     Payload for HIDRA's 'ReservationReply' messages
     """
 
-    applicant_id: str
     sn_e: int
-    signature: bytes
+    sn_r: int
 
 
 @dataclass(msg_id=RESERVATION_CREDIT)
-class ReservationCommitPayload:
+class ReservationCreditPayload:
     """
-    Payload for HIDRA's 'ReservationCommit' messages
+    Payload for HIDRA's 'ReservationCredit' messages
     """
 
     sn_e: int
     sn_r: int
-    reservation_qc: bytes
-
-    @staticmethod
-    def fix_pack_reservation_qc(dictionary: dict) -> bytes:
-        return json.dumps(dictionary).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_reservation_qc(cls, serialized_dictionary: bytes) -> dict:
-        return json.loads(serialized_dictionary.decode("utf-8"))
