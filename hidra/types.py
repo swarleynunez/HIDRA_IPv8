@@ -85,9 +85,9 @@ class HIDRAEvent:
     HIDRA offloading event (local information)
     """
 
-    def __init__(self, info: HIDRAEventInfo):
+    def __init__(self):
         # Shared info
-        self.info = info
+        self.info: HIDRAEventInfo = None
 
         # Local info
         self.available_peers = []
@@ -97,7 +97,6 @@ class HIDRAEvent:
         self.locking_credits = {}
 
         self.sn_r = 0
-        self.reservation_echo_sent = False
         self.reservation_echos = {}
         self.reservation_readys = {}
 

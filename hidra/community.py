@@ -12,7 +12,7 @@ from hidra.payload import REQUEST_RESOURCE_INFO, RESOURCE_INFO, RequestResourceI
     RESERVATION_DENY, LockingReadyPayload, ReservationEchoPayload, ReservationDenyPayload, ReservationCreditPayload
 from hidra.settings import HIDRASettings
 from hidra.types import HIDRAPeerInfo, HIDRAEventInfo, HIDRAWorkload, HIDRAPeer, HIDRAEvent, IPv8PendingMessage
-from hidra.utils import get_peer_id, get_object_id, sign_data, verify_sign, hash_data
+from hidra.utils import get_peer_id, get_object_id, verify_sign, hash_data
 from pyipv8.ipv8.community import Community
 from pyipv8.ipv8.lazy_community import lazy_wrapper
 from pyipv8.ipv8.peer import Peer
@@ -148,6 +148,12 @@ class HIDRACommunity(Community):
             elif v.payload.msg_id == LOCKING_READY:
                 # Process pending 'LockingReady' message
                 self.process_locking_ready_message(v.sender, v.payload)
+            elif v.payload.msg_id == RESERVATION_ECHO:
+                # Process pending 'ReservationEcho' message
+                self.process_reservation_echo_message(v.sender, v.payload)
+            elif v.payload.msg_id == RESERVATION_READY:
+                # Process pending 'ReservationReady' message
+                self.process_reservation_ready_message(v.sender, v.payload)
 
     #############
     # Callbacks #
@@ -180,6 +186,7 @@ class HIDRACommunity(Community):
 
     @lazy_wrapper(ReservationEchoPayload)
     def on_reservation_echo(self, sender, payload) -> None:
+        self.process_pending_messages()
         self.process_reservation_echo_message(sender, payload)
 
     @lazy_wrapper(ReservationDenyPayload)
@@ -251,6 +258,8 @@ class HIDRACommunity(Community):
     #########
     # APPLICANT
     def ssp(self, sn_e) -> None:
+        event_id = get_object_id(self.my_peer_id, sn_e)
+
         # Select a domain
         to_domain_id = self.select_domain()
 
@@ -259,7 +268,8 @@ class HIDRACommunity(Community):
         event_info = HIDRAEventInfo(to_domain_id, "", workload, 1800, 1, int(time.time()) + 180)
 
         # Update storage
-        self.events[get_object_id(self.my_peer_id, sn_e)] = HIDRAEvent(event_info)
+        self.events[event_id] = HIDRAEvent()
+        self.events[event_id].info = event_info
 
         # Debug
         print("SSP:"
@@ -367,7 +377,8 @@ class HIDRACommunity(Community):
 
         # Update storage
         peer.deposits[payload.sn_e] = deposit
-        self.events[event_id] = HIDRAEvent(payload.event_info)
+        self.events[event_id] = HIDRAEvent()
+        self.events[event_id].info = payload.event_info
         self.events[event_id].locking_echo_sent = True
 
         # Debug
@@ -468,7 +479,7 @@ class HIDRACommunity(Community):
 
         # Requirements
         if not self.exist_event(event_id):
-            self.events[event_id] = HIDRAEvent(payload.event_info)
+            self.events[event_id] = HIDRAEvent()
         event = self.events[event_id]
         if sender_id in event.locking_credits:
             # Dismiss the message...
@@ -487,7 +498,7 @@ class HIDRACommunity(Community):
 
         # Required equal credits for a locking?
         if self.has_required_replies(event.locking_credits, self.required_replies_for_proof()):
-            solver_id = event.info.to_solver_id
+            solver_id = payload.event_info.to_solver_id
             peer = self.peers[solver_id]
 
             # Payload data
@@ -495,6 +506,7 @@ class HIDRACommunity(Community):
 
             # Update storage
             peer.info.sn_r += 1
+            event.info = payload.event_info
             event.sn_r = sn_r
 
             # Debug
@@ -509,11 +521,10 @@ class HIDRACommunity(Community):
 
             # Solver parent domain sends ReservationEcho messages to itself
             for peer in self.domains[self.parent_domain_id]:
-                self.ez_send(peer, ReservationEchoPayload(payload.sn_e, sn_r))
+                self.ez_send(peer, ReservationEchoPayload(payload.applicant_id, payload.sn_e, sn_r))
 
     # SOLVE PARENT DOMAIN
     def process_reservation_echo_message(self, sender, payload) -> None:
-        # TODO
         sender_id = get_peer_id(sender)
         event_id = get_object_id(payload.applicant_id, payload.sn_e)
 
@@ -522,20 +533,22 @@ class HIDRACommunity(Community):
             self.add_pending_message(sender, payload)
             return
         event = self.events[event_id]
-        if sender_id in event.locking_echos:
+        if sender_id in event.reservation_echos:
             # Dismiss the message...
             return
-        if self.has_required_replies(event.locking_echos, self.required_replies_for_quorum()):
+        if self.has_required_replies(event.reservation_echos, self.required_replies_for_quorum()):
             # Dismiss the message...
             return
 
         # Format and hash event data
         data = payload.applicant_id + ":" + \
                str(payload.sn_e) + ":" + \
-               str(payload.event_info)
+               str(payload.sn_r)
 
         # Update storage
-        event.locking_echos[sender_id] = hash_data(data)
+        event.reservation_echos[sender_id] = hash_data(data)
+
+        return
 
         # Required equal echos for a locking?
         if self.has_required_replies(event.locking_echos, self.required_replies_for_quorum()):

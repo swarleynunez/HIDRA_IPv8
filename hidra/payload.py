@@ -160,6 +160,7 @@ class ReservationEchoPayload:
     Payload for HIDRA's 'ReservationEcho' messages
     """
 
+    applicant_id: str
     sn_e: int
     sn_r: int
 
