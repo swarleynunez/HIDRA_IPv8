@@ -19,10 +19,10 @@ class HIDRASettings:
     domain_selection_policy = "inter"
 
     # Timeout for resource replies to select Solvers
-    ssp_timeout = 5
+    ssp_timeout = 3
 
-    # Timestamp when the monitoring process of a workload starts
-    wrp_start_timestamp = 5
+    # Timeout for balance locking and resource reservation
+    wrp_timeout = 3
 
     # TODO
     # Number of containers initially executed by each peer

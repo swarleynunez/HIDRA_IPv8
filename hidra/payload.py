@@ -24,6 +24,10 @@ RESERVATION_DENY = 8
 RESERVATION_READY = 9
 RESERVATION_CREDIT = 10
 
+# WRP:
+EVENT_CONFIRMATION = 11
+EVENT_DENY = 12
+
 
 # WEP
 
@@ -196,3 +200,23 @@ class ReservationCreditPayload:
     applicant_id: str
     sn_e: int
     sn_r: int
+
+
+@dataclass(msg_id=EVENT_CONFIRMATION)
+class EventConfirmationPayload:
+    """
+    Payload for HIDRA's 'EventConfirmation' messages
+    """
+
+    applicant_id: str
+    sn_e: int
+
+
+@dataclass(msg_id=EVENT_DENY)
+class EventDenyPayload:
+    """
+    Payload for HIDRA's 'EventDeny' messages
+    """
+
+    applicant_id: str
+    sn_e: int

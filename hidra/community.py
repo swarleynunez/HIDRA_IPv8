@@ -9,10 +9,11 @@ from bami.settings import SimulationSettings
 from hidra.payload import REQUEST_RESOURCE_INFO, RESOURCE_INFO, RequestResourceInfoPayload, ResourceInfoPayload, \
     LockingSendPayload, LOCKING_SEND, LOCKING_ECHO, LOCKING_READY, LockingEchoPayload, LockingCreditPayload, \
     RESERVATION_ECHO, RESERVATION_READY, RESERVATION_CREDIT, LOCKING_CREDIT, RESERVATION_DENY, LockingReadyPayload, \
-    ReservationEchoPayload, ReservationDenyPayload, ReservationCreditPayload, ReservationReadyPayload
+    ReservationEchoPayload, ReservationDenyPayload, ReservationCreditPayload, ReservationReadyPayload, \
+    EVENT_CONFIRMATION, EVENT_DENY, EventConfirmationPayload, EventDenyPayload
 from hidra.settings import HIDRASettings
 from hidra.types import HIDRAPeerInfo, HIDRAEventInfo, HIDRAWorkload, HIDRAPeer, HIDRAEvent, IPv8PendingMessage
-from hidra.utils import get_peer_id, get_object_id, verify_sign, hash_data
+from hidra.utils import get_peer_id, get_object_id, hash_data
 from pyipv8.ipv8.community import Community
 from pyipv8.ipv8.lazy_community import lazy_wrapper
 from pyipv8.ipv8.peer import Peer
@@ -66,6 +67,8 @@ class HIDRACommunity(Community):
         self.add_message_handler(RESERVATION_DENY, self.on_reservation_deny)
         self.add_message_handler(RESERVATION_READY, self.on_reservation_ready)
         self.add_message_handler(RESERVATION_CREDIT, self.on_reservation_credit)
+        self.add_message_handler(EVENT_CONFIRMATION, self.on_event_confirmation)
+        self.add_message_handler(EVENT_DENY, self.on_event_deny)
 
     ########
     # Peer #
@@ -88,7 +91,7 @@ class HIDRACommunity(Community):
 
                 # Workload Execution Phase (WEP)
                 self.register_task("wep_" + str(self.next_sn_e), self.wep, self.next_sn_e,
-                                   delay=HIDRASettings.ssp_timeout + HIDRASettings.wrp_start_timestamp)
+                                   delay=HIDRASettings.ssp_timeout + HIDRASettings.wrp_timeout)
 
                 # Update storage
                 self.next_sn_e += 1
@@ -202,6 +205,14 @@ class HIDRACommunity(Community):
     def on_reservation_credit(self, sender, payload) -> None:
         self.process_reservation_credit_message(sender, payload)
 
+    @lazy_wrapper(EventConfirmationPayload)
+    def on_event_confirmation(self, sender, payload) -> None:
+        self.process_event_confirmation_message(sender, payload)
+
+    @lazy_wrapper(EventDenyPayload)
+    def on_event_deny(self, sender, payload) -> None:
+        self.process_event_deny_message(sender, payload)
+
     #########
     # Tasks #
     #########
@@ -239,7 +250,7 @@ class HIDRACommunity(Community):
 
         # Payload data
         # TODO. Check event info to make a decision
-        available = random.choice([True, False])
+        available = random.choice([True])
         domain_info = {}
         for peer in self.domains[self.parent_domain_id]:
             peer_id = get_peer_id(peer)
@@ -364,9 +375,7 @@ class HIDRACommunity(Community):
             return
 
         # Format and hash event data
-        data = payload.applicant_id + ":" + \
-               str(payload.sn_e) + ":" + \
-               str(payload.event_info)
+        data = payload.applicant_id + ":" + str(payload.sn_e) + ":" + str(payload.event_info)
 
         # Update storage
         event.locking_echos[sender_id] = hash_data(data)
@@ -403,9 +412,7 @@ class HIDRACommunity(Community):
             return
 
         # Format and hash event data
-        data = payload.applicant_id + ":" + \
-               str(payload.sn_e) + ":" + \
-               str(payload.event_info)
+        data = payload.applicant_id + ":" + str(payload.sn_e) + ":" + str(payload.event_info)
 
         # Update storage
         event.locking_readys[sender_id] = hash_data(data)
@@ -441,9 +448,7 @@ class HIDRACommunity(Community):
             return
 
         # Format and hash event data
-        data = payload.applicant_id + ":" + \
-               str(payload.sn_e) + ":" + \
-               str(payload.event_info)
+        data = payload.applicant_id + ":" + str(payload.sn_e) + ":" + str(payload.event_info)
 
         # Update storage
         event.locking_credits[sender_id] = hash_data(data)
@@ -458,7 +463,6 @@ class HIDRACommunity(Community):
             # Update storage
             self.peers[payload.applicant_id].info.sn_e += 1
             event.info = payload.event_info
-            event.sn_r = sn_r
 
             # Debug
             print("[Time:" + format(get_event_loop().time(), ".3f") +
@@ -526,6 +530,9 @@ class HIDRACommunity(Community):
                 for peer in self.domains[event.info.from_domain_id]:
                     self.ez_send(peer, ReservationDenyPayload(payload.applicant_id, payload.sn_e, payload.sn_r))
                 return
+
+            # Update storage
+            solver.reservations[payload.sn_e] = resource_limit
 
             # Debug
             print("[Time:" + format(get_event_loop().time(), ".3f") +
@@ -603,6 +610,14 @@ class HIDRACommunity(Community):
 
     # APPLICANT PARENT DOMAIN
     def process_reservation_credit_message(self, sender, payload) -> None:
+        pass
+
+    # APPLICANT PARENT DOMAIN
+    def process_event_confirmation_message(self, sender, payload) -> None:
+        pass
+
+    # SOLVER PARENT DOMAIN
+    def process_event_deny_message(self, sender, payload) -> None:
         pass
 
     # APPLICANT PARENT DOMAIN

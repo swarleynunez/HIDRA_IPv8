@@ -95,11 +95,12 @@ class HIDRAEvent:
         self.locking_echos = {}
         self.locking_readys = {}
         self.locking_credits = {}
-
-        self.sn_r = 0
         self.reservation_echos = {}
         self.reservation_denys = {}
         self.reservation_readys = {}
+        self.reservation_credits = {}
+        self.confirmations = {}
+        self.denys = {}
 
 
 class IPv8PendingMessage:
