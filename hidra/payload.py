@@ -171,15 +171,18 @@ class ReservationDenyPayload:
     Payload for HIDRA's 'ReservationDeny' messages
     """
 
+    applicant_id: str
     sn_e: int
+    sn_r: int
 
 
 @dataclass(msg_id=RESERVATION_READY)
-class ReservationReplyPayload:
+class ReservationReadyPayload:
     """
-    Payload for HIDRA's 'ReservationReply' messages
+    Payload for HIDRA's 'ReservationReady' messages
     """
 
+    applicant_id: str
     sn_e: int
     sn_r: int
 
@@ -190,5 +193,6 @@ class ReservationCreditPayload:
     Payload for HIDRA's 'ReservationCredit' messages
     """
 
+    applicant_id: str
     sn_e: int
     sn_r: int

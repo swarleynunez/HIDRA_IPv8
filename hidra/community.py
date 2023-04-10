@@ -8,8 +8,8 @@ from collections import Counter
 from bami.settings import SimulationSettings
 from hidra.payload import REQUEST_RESOURCE_INFO, RESOURCE_INFO, RequestResourceInfoPayload, ResourceInfoPayload, \
     LockingSendPayload, LOCKING_SEND, LOCKING_ECHO, LOCKING_READY, LockingEchoPayload, LockingCreditPayload, \
-    RESERVATION_ECHO, RESERVATION_READY, RESERVATION_CREDIT, ReservationReplyPayload, LOCKING_CREDIT, \
-    RESERVATION_DENY, LockingReadyPayload, ReservationEchoPayload, ReservationDenyPayload, ReservationCreditPayload
+    RESERVATION_ECHO, RESERVATION_READY, RESERVATION_CREDIT, LOCKING_CREDIT, RESERVATION_DENY, LockingReadyPayload, \
+    ReservationEchoPayload, ReservationDenyPayload, ReservationCreditPayload, ReservationReadyPayload
 from hidra.settings import HIDRASettings
 from hidra.types import HIDRAPeerInfo, HIDRAEventInfo, HIDRAWorkload, HIDRAPeer, HIDRAEvent, IPv8PendingMessage
 from hidra.utils import get_peer_id, get_object_id, verify_sign, hash_data
@@ -104,7 +104,7 @@ class HIDRACommunity(Community):
             for peer in domain:
                 # Update storage
                 p = HIDRAPeer()
-                p.info = HIDRAPeerInfo(balance, r_max, r_max, 0, 0)
+                p.info = HIDRAPeerInfo(balance, r_max, 0, 0)
                 self.peers[get_peer_id(peer)] = p
 
     def set_domains(self) -> None:
@@ -145,15 +145,15 @@ class HIDRACommunity(Community):
             if v.payload.msg_id == LOCKING_ECHO:
                 # Process pending 'LockingEcho' message
                 self.process_locking_echo_message(v.sender, v.payload)
-            elif v.payload.msg_id == LOCKING_READY:
-                # Process pending 'LockingReady' message
-                self.process_locking_ready_message(v.sender, v.payload)
+            # elif v.payload.msg_id == LOCKING_READY:
+            #     # Process pending 'LockingReady' message
+            #     self.process_locking_ready_message(v.sender, v.payload)
             elif v.payload.msg_id == RESERVATION_ECHO:
                 # Process pending 'ReservationEcho' message
                 self.process_reservation_echo_message(v.sender, v.payload)
-            elif v.payload.msg_id == RESERVATION_READY:
-                # Process pending 'ReservationReady' message
-                self.process_reservation_ready_message(v.sender, v.payload)
+            # elif v.payload.msg_id == RESERVATION_READY:
+            #     # Process pending 'ReservationReady' message
+            #     self.process_reservation_ready_message(v.sender, v.payload)
 
     #############
     # Callbacks #
@@ -177,7 +177,7 @@ class HIDRACommunity(Community):
 
     @lazy_wrapper(LockingReadyPayload)
     def on_locking_ready(self, sender, payload) -> None:
-        self.process_pending_messages()
+        # self.process_pending_messages()
         self.process_locking_ready_message(sender, payload)
 
     @lazy_wrapper(LockingCreditPayload)
@@ -191,67 +191,16 @@ class HIDRACommunity(Community):
 
     @lazy_wrapper(ReservationDenyPayload)
     def on_reservation_deny(self, sender, payload) -> None:
-        pass
+        self.process_reservation_deny_message(sender, payload)
 
-    @lazy_wrapper(ReservationReplyPayload)
+    @lazy_wrapper(ReservationReadyPayload)
     def on_reservation_ready(self, sender, payload) -> None:
-        sender_id = get_peer_id(sender)
-        event = self.events[get_object_id(payload.applicant_id, payload.sn_e)]
-
-        # Requirements
-        if len(event.reservation_qc) == self.required_replies_for_quorum():
-            # Dismiss the message...
-            return
-        data = str(payload.sn_e) + ":" + str(event.sn_r)
-        if not verify_sign(sender.public_key, data, payload.signature):
-            print("INFO ---> Peer:" + sender_id + " sent an invalid signature for Reservation:" + str(event.sn_r))
-            return
-
-        # Update storage
-        event.reservation_qc[sender_id] = str(payload.signature, "latin1")  # Due to JSON bytes serialization
-
-        # Received required replies?
-        if len(event.reservation_qc) == self.required_replies_for_quorum():
-            # Debug
-            print("[Time:" + format(get_event_loop().time(), ".3f") +
-                  "][Domain:" + str(self.parent_domain_id) +
-                  "][Peer:" + self.my_peer_id +
-                  "] Sending ReservationCommit ---> " +
-                  "Applicant:" + payload.applicant_id +
-                  ", Event:" + str(payload.sn_e) +
-                  ", Reservation:" + str(event.sn_r))
-
-            # Solver sends ReservationCommit message to the Applicant
-            self.ez_send(self.get_peer_from_id(payload.applicant_id),
-                         ReservationCreditPayload(payload.sn_e, event.sn_r, event.reservation_qc))
+        # self.process_pending_messages()
+        self.process_reservation_ready_message(sender, payload)
 
     @lazy_wrapper(ReservationCreditPayload)
     def on_reservation_credit(self, sender, payload) -> None:
-        event_id = get_object_id(self.my_peer_id, payload.sn_e)
-
-        # Requirements
-        if len(payload.reservation_qc) != self.required_replies_for_quorum():
-            print("INFO ---> Invalid reservation QC for Event:" + str(payload.sn_e))
-            return
-        for k, v in payload.reservation_qc.items():
-            data = str(payload.sn_e) + ":" + str(payload.sn_r)
-            if not verify_sign(self.get_peer_from_id(k).public_key, data, bytes(v, "latin1")):
-                print("INFO ---> Invalid reservation QC for Event:" + str(payload.sn_e))
-                return
-
-        # Update storage
-        self.events[event_id].reservation_qc = payload.reservation_qc
-
-        # Debug
-        print("\n[Time:" + format(get_event_loop().time(), ".3f") +
-              "][Domain:" + str(self.parent_domain_id) +
-              "][Peer:" + self.my_peer_id +
-              "] Sending ReservationQCSend ---> " +
-              "Domain:" + str(self.parent_domain_id) +
-              ", Event:" + str(payload.sn_e) +
-              ", Reservation:" + str(payload.sn_r))
-
-        # Applicant sends ReservationQCSend messages to its parent domain
+        self.process_reservation_credit_message(sender, payload)
 
     #########
     # Tasks #
@@ -265,7 +214,7 @@ class HIDRACommunity(Community):
 
         # Payload data
         workload = HIDRAWorkload("nginx", 1024, 8888)
-        event_info = HIDRAEventInfo(to_domain_id, "", workload, 1800, 1, int(time.time()) + 180)
+        event_info = HIDRAEventInfo(self.parent_domain_id, to_domain_id, "", workload, 1800, 1, int(time.time()) + 180)
 
         # Update storage
         self.events[event_id] = HIDRAEvent()
@@ -369,6 +318,7 @@ class HIDRACommunity(Community):
             # Dismiss the message...
             return
         if payload.sn_e != peer.info.sn_e:
+            # TODO: wait for or request previous sn_e
             print("INFO ---> Missing past events for Peer:" + sender_id)
             return
         if deposit > self.get_available_balance(peer):
@@ -376,6 +326,7 @@ class HIDRACommunity(Community):
             return
 
         # Update storage
+        peer.info.sn_e += 1
         peer.deposits[payload.sn_e] = deposit
         self.events[event_id] = HIDRAEvent()
         self.events[event_id].info = payload.event_info
@@ -388,6 +339,7 @@ class HIDRACommunity(Community):
               "] Sending LockingEcho ---> " +
               "Domain:" + str(self.parent_domain_id) +
               ", Event:" + str(payload.sn_e) +
+              ", Applicant:" + sender_id +
               ", Deposit:" + str(deposit))
 
         # Applicant parent domain sends LockingEcho messages to itself
@@ -439,9 +391,9 @@ class HIDRACommunity(Community):
         event_id = get_object_id(payload.applicant_id, payload.sn_e)
 
         # Requirements
-        if not self.exist_event(event_id):
-            self.add_pending_message(sender, payload)
-            return
+        # if not self.exist_event(event_id):
+        #     self.add_pending_message(sender, payload)
+        #     return
         event = self.events[event_id]
         if sender_id in event.locking_readys:
             # Dismiss the message...
@@ -499,13 +451,12 @@ class HIDRACommunity(Community):
         # Required equal credits for a locking?
         if self.has_required_replies(event.locking_credits, self.required_replies_for_proof()):
             solver_id = payload.event_info.to_solver_id
-            peer = self.peers[solver_id]
 
             # Payload data
-            sn_r = peer.info.sn_r
+            sn_r = self.peers[solver_id].info.sn_r
 
             # Update storage
-            peer.info.sn_r += 1
+            self.peers[payload.applicant_id].info.sn_e += 1
             event.info = payload.event_info
             event.sn_r = sn_r
 
@@ -523,7 +474,7 @@ class HIDRACommunity(Community):
             for peer in self.domains[self.parent_domain_id]:
                 self.ez_send(peer, ReservationEchoPayload(payload.applicant_id, payload.sn_e, sn_r))
 
-    # SOLVE PARENT DOMAIN
+    # SOLVER PARENT DOMAIN
     def process_reservation_echo_message(self, sender, payload) -> None:
         sender_id = get_peer_id(sender)
         event_id = get_object_id(payload.applicant_id, payload.sn_e)
@@ -540,37 +491,115 @@ class HIDRACommunity(Community):
             # Dismiss the message...
             return
 
-        # Format and hash event data
-        data = payload.applicant_id + ":" + \
-               str(payload.sn_e) + ":" + \
-               str(payload.sn_r)
+        # Format and hash reservation data
+        data = payload.applicant_id + ":" + str(payload.sn_e) + ":" + str(payload.sn_r)
 
         # Update storage
         event.reservation_echos[sender_id] = hash_data(data)
 
-        return
+        # Required equal echos for a reservation?
+        if self.has_required_replies(event.reservation_echos, self.required_replies_for_quorum()):
+            # Requirements
+            solver_id = event.info.to_solver_id
+            solver = self.peers[solver_id]
+            if payload.sn_r != solver.info.sn_r:
+                # TODO: f + 1 largest sn_r?
+                # TODO: wait for or request previous sn_r
+                print("INFO ---> Missing past reservations for Peer:" + solver_id)
+                return
 
-        # Required equal echos for a locking?
-        if self.has_required_replies(event.locking_echos, self.required_replies_for_quorum()):
+            # Update storage
+            solver.info.sn_r += 1
+
+            # Requirements
+            resource_limit = event.info.workload.resource_limit
+            if resource_limit > self.get_free_resources(solver):
+                # Debug
+                print("[Time:" + format(get_event_loop().time(), ".3f") +
+                      "][Domain:" + str(self.parent_domain_id) +
+                      "][Peer:" + self.my_peer_id +
+                      "] Sending ReservationDeny ---> " +
+                      "Domain:" + str(event.info.from_domain_id) +
+                      ", Event:" + str(payload.sn_e))
+
+                # Solver parent domain sends ReservationDeny messages to Applicant parent domain
+                for peer in self.domains[event.info.from_domain_id]:
+                    self.ez_send(peer, ReservationDenyPayload(payload.applicant_id, payload.sn_e, payload.sn_r))
+                return
+
             # Debug
             print("[Time:" + format(get_event_loop().time(), ".3f") +
                   "][Domain:" + str(self.parent_domain_id) +
                   "][Peer:" + self.my_peer_id +
-                  "] Sending LockingReady ---> " +
+                  "] Sending ReservationReady ---> " +
                   "Domain:" + str(self.parent_domain_id) +
                   ", Event:" + str(payload.sn_e))
 
-            # Applicant parent domain sends LockingReady messages to itself
+            # Solver parent domain sends ReservationReady messages to itself
             for peer in self.domains[self.parent_domain_id]:
-                self.ez_send(peer, LockingReadyPayload(payload.applicant_id, payload.sn_e, payload.event_info))
+                self.ez_send(peer, ReservationReadyPayload(payload.applicant_id, payload.sn_e, payload.sn_r))
 
     # APPLICANT PARENT DOMAIN
     def process_reservation_deny_message(self, sender, payload) -> None:
-        pass
+        sender_id = get_peer_id(sender)
+        event = self.events[get_object_id(payload.applicant_id, payload.sn_e)]
+
+        # Requirements
+        if sender_id in event.reservation_denys:
+            # Dismiss the message...
+            return
+        if self.has_required_replies(event.reservation_denys, self.required_replies_for_proof()):
+            # Dismiss the message...
+            return
+
+        # Format and hash reservation data
+        data = payload.applicant_id + ":" + str(payload.sn_e) + ":" + str(payload.sn_r)
+
+        # Update storage
+        event.reservation_denys[sender_id] = hash_data(data)
+
+        # Required equal denys for a reservation?
+        if self.has_required_replies(event.reservation_denys, self.required_replies_for_proof()):
+            # Update storage
+            del self.peers[payload.applicant_id].deposits[payload.sn_e]
+            self.peers[event.info.to_solver_id].info.sn_r += 1
 
     # SOLVER PARENT DOMAIN
     def process_reservation_ready_message(self, sender, payload) -> None:
-        pass
+        sender_id = get_peer_id(sender)
+        event_id = get_object_id(payload.applicant_id, payload.sn_e)
+
+        # Requirements
+        # if not self.exist_event(event_id):
+        #     self.add_pending_message(sender, payload)
+        #     return
+        event = self.events[event_id]
+        if sender_id in event.reservation_readys:
+            # Dismiss the message...
+            return
+        if self.has_required_replies(event.reservation_readys, self.required_replies_for_proof()):
+            # Dismiss the message...
+            return
+
+        # Format and hash reservation data
+        data = payload.applicant_id + ":" + str(payload.sn_e) + ":" + str(payload.sn_r)
+
+        # Update storage
+        event.reservation_readys[sender_id] = hash_data(data)
+
+        # Required equal readys for a reservation?
+        if self.has_required_replies(event.reservation_readys, self.required_replies_for_proof()):
+            # Debug
+            print("[Time:" + format(get_event_loop().time(), ".3f") +
+                  "][Domain:" + str(self.parent_domain_id) +
+                  "][Peer:" + self.my_peer_id +
+                  "] Sending ReservationCredit ---> " +
+                  "Domain:" + str(event.info.from_domain_id) +
+                  ", Event:" + str(payload.sn_e))
+
+            # Solver parent domain sends ReservationCredit messages to Applicant parent domain
+            for peer in self.domains[event.info.from_domain_id]:
+                self.ez_send(peer, ReservationCreditPayload(payload.applicant_id, payload.sn_e, payload.sn_r))
 
     # APPLICANT PARENT DOMAIN
     def process_reservation_credit_message(self, sender, payload) -> None:
@@ -625,7 +654,7 @@ class HIDRACommunity(Community):
         for v in peer.reservations.values():
             reserved += v
 
-        return peer.info.r_free - reserved
+        return peer.info.r_max - reserved
 
     @staticmethod
     def required_replies_for_quorum() -> int:

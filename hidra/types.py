@@ -12,17 +12,15 @@ class HIDRAPeerInfo:
     HIDRA peer (shared information)
     """
 
-    def __init__(self, balance: int, r_max: int, r_free: int, sn_e: int, sn_r: int):
+    def __init__(self, balance: int, r_max: int, sn_e: int, sn_r: int):
         self.balance = balance
         self.r_max = r_max
-        self.r_free = r_free
         self.sn_e = sn_e
         self.sn_r = sn_r
 
     def __str__(self):
         return str(self.balance) + ":" + \
             str(self.r_max) + ":" + \
-            str(self.r_free) + ":" + \
             str(self.sn_e) + ":" + \
             str(self.sn_r)
 
@@ -60,8 +58,10 @@ class HIDRAEventInfo:
     HIDRA offloading event (shared information)
     """
 
-    def __init__(self, to_domain_id: int, to_solver_id: str, workload: HIDRAWorkload,
+    def __init__(self, from_domain_id: int, to_domain_id: int,
+                 to_solver_id: str, workload: HIDRAWorkload,
                  t_exec_value: int, p_ratio_value: int, ts_start: int):
+        self.from_domain_id = from_domain_id
         self.to_domain_id = to_domain_id
         self.to_solver_id = to_solver_id
         self.workload = workload
@@ -98,6 +98,7 @@ class HIDRAEvent:
 
         self.sn_r = 0
         self.reservation_echos = {}
+        self.reservation_denys = {}
         self.reservation_readys = {}
 
 
