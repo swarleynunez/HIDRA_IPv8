@@ -8,7 +8,7 @@ class SimulationSettings:
     domains: int = 2
 
     # Number of IPv8 peers per HIDRA domain
-    peers_per_domain = 3
+    peers_per_domain = 10
 
     # Number of IPv8 peers
     peers: int = domains * peers_per_domain

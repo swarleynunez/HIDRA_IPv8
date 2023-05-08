@@ -9,31 +9,23 @@ class HIDRASettings:
     # Identifier size of HIDRA objects (in number of hexadecimal characters)
     object_id_size: int = 8
 
-    # Initial balance per peer
-    initial_balance = 3600
+    # Initial balance units per peer
+    initial_balance = 1000000
 
-    # Initial resource offer per peer
-    max_resources = 10240
+    # Initial resource units offer per peer
+    max_resources = 1000000
 
     # Peers send offloading events to their parent domains (intra) or to other domains (inter)
-    domain_selection_policy = "inter"
+    domain_selection_policy = "intra"
+
+    # Offloading events sent per peer
+    events_per_peer = 1
+
+    # Delay between offloading events (in milliseconds)
+    event_sending_delay = 1000
 
     # Timeout for resource replies to select Solvers
-    ssp_timeout = 3
+    ssp_timeout = 5
 
     # Timeout for balance locking and resource reservation
-    wrp_timeout = 3
-
-    # TODO
-    # Number of containers initially executed by each peer
-    initial_containers: int = 0
-
-    # Weighting factors to select event solvers (between 0 and 1)
-    usage_factor = 0.1
-    reputation_factor = 1 - usage_factor
-
-    # Execute a free-rider peer
-    enable_free_rider: bool = False
-
-    # Free-riding type: "over" or "under"
-    free_riding_type: str = "over"
+    wrp_timeout = 5

@@ -175,6 +175,19 @@ class BamiSimulation(TaskManager):
 
         # HIDRA
         # self.print_final_statistics()
+        for peer in self.nodes:
+            peer_id = get_peer_id(peer.overlay.my_peer)
+            print("--- VISTA DE", peer_id, "---")
+            for k, v in peer.overlay.messages.items():
+                print("APPLICANT:", v.payload.applicant_id,
+                      "EVENT:", v.payload.sn_e,
+                      "MSG_ID", v.payload.msg_id)
+            # for k, v in peer.overlay.events.items():
+            #     print(k, v.locking_credits, v.reservation_echos)
+            # print("\n")
+            for k, v in peer.overlay.peers.items():
+                print(k, v.info, v.deposits, v.next_sn_r, v.reservations)
+            print("\n")
 
     async def run(self) -> None:
         self.setup_directories()

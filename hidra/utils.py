@@ -24,7 +24,3 @@ def sign_data(private_key: PrivateKey, data: str) -> bytes:
 def verify_sign(public_key: PublicKey, data: str, signature: bytes) -> bool:
     data_hash = sha1(data.encode("utf-8")).digest()
     return default_eccrypto.is_valid_signature(public_key, data_hash, signature)
-
-
-def hash_data(data: str) -> str:
-    return sha1(data.encode("utf-8")).digest()

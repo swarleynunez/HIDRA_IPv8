@@ -20,13 +20,13 @@ LOCKING_CREDIT = 6
 
 # WRP: reservation
 RESERVATION_ECHO = 7
-RESERVATION_DENY = 8
+RESERVATION_CANCEL = 8
 RESERVATION_READY = 9
 RESERVATION_CREDIT = 10
 
-# WRP:
-EVENT_CONFIRMATION = 11
-EVENT_DENY = 12
+# WRP: confirmation
+EVENT_CONFIRM = 11
+EVENT_CANCEL = 12
 
 
 # WEP
@@ -167,17 +167,18 @@ class ReservationEchoPayload:
     applicant_id: str
     sn_e: int
     sn_r: int
+    vote: bool
+    number: int
 
 
-@dataclass(msg_id=RESERVATION_DENY)
-class ReservationDenyPayload:
+@dataclass(msg_id=RESERVATION_CANCEL)
+class ReservationCancelPayload:
     """
-    Payload for HIDRA's 'ReservationDeny' messages
+    Payload for HIDRA's 'ReservationCancel' messages
     """
 
     applicant_id: str
     sn_e: int
-    sn_r: int
 
 
 @dataclass(msg_id=RESERVATION_READY)
@@ -202,20 +203,20 @@ class ReservationCreditPayload:
     sn_r: int
 
 
-@dataclass(msg_id=EVENT_CONFIRMATION)
-class EventConfirmationPayload:
+@dataclass(msg_id=EVENT_CONFIRM)
+class EventConfirmPayload:
     """
-    Payload for HIDRA's 'EventConfirmation' messages
+    Payload for HIDRA's 'EventConfirm' messages
     """
 
     applicant_id: str
     sn_e: int
 
 
-@dataclass(msg_id=EVENT_DENY)
-class EventDenyPayload:
+@dataclass(msg_id=EVENT_CANCEL)
+class EventCancelPayload:
     """
-    Payload for HIDRA's 'EventDeny' messages
+    Payload for HIDRA's 'EventCancel' messages
     """
 
     applicant_id: str

@@ -15,8 +15,8 @@ class HIDRAPeerInfo:
     def __init__(self, balance: int, r_max: int, sn_e: int, sn_r: int):
         self.balance = balance
         self.r_max = r_max
-        self.sn_e = sn_e
-        self.sn_r = sn_r
+        self.sn_e = sn_e  # Last offloading event used/seen
+        self.sn_r = sn_r  # Last resource reservation used/seen
 
     def __str__(self):
         return str(self.balance) + ":" + \
@@ -33,7 +33,9 @@ class HIDRAPeer:
     def __init__(self):
         self.info: HIDRAPeerInfo = None
         self.resource_replies = {}
+        self.next_sn_e = 0  # Next offloading event expected to be received
         self.deposits = {}
+        self.next_sn_r = 0  # Next resource reservation expected to be received
         self.reservations = {}
 
 
@@ -58,12 +60,11 @@ class HIDRAEventInfo:
     HIDRA offloading event (shared information)
     """
 
-    def __init__(self, from_domain_id: int, to_domain_id: int,
-                 to_solver_id: str, workload: HIDRAWorkload,
+    def __init__(self, from_domain_id: int, to_domain_id: int, solver_id: str, workload: HIDRAWorkload,
                  t_exec_value: int, p_ratio_value: int, ts_start: int):
         self.from_domain_id = from_domain_id
         self.to_domain_id = to_domain_id
-        self.to_solver_id = to_solver_id
+        self.solver_id = solver_id
         self.workload = workload
         self.t_exec_value = t_exec_value
         # self.t_exec_unit = TimeUnit.S.value
@@ -72,8 +73,9 @@ class HIDRAEventInfo:
         self.ts_start = ts_start
 
     def __str__(self):
-        return str(self.to_domain_id) + ":" + \
-            self.to_solver_id + ":" + \
+        return str(self.from_domain_id) + ":" + \
+            str(self.to_domain_id) + ":" + \
+            self.solver_id + ":" + \
             str(self.workload) + ":" + \
             str(self.t_exec_value) + ":" + \
             str(self.p_ratio_value) + ":" + \
@@ -89,18 +91,29 @@ class HIDRAEvent:
         # Shared info
         self.info: HIDRAEventInfo = None
 
-        # Local info
+        # Local info: WEP
         self.available_peers = []
-        self.locking_echo_sent = False
+
+        # Local info: WRP
+        self.locking_echo_ok = False
+        self.locking_ready_ok = False
+        self.locking_credit_ok = False
+        self.reservation_echo_ok = False
+        self.reservation_ready_ok = False
+        self.reservation_cancel_ok = False
+        self.reservation_credit_ok = False
+        self.confirm_ok = False
+        self.cancel_ok = False
         self.locking_echos = {}
         self.locking_readys = {}
         self.locking_credits = {}
         self.reservation_echos = {}
-        self.reservation_denys = {}
+        self.reservation_echos2 = {}
         self.reservation_readys = {}
+        self.reservation_cancels = {}
         self.reservation_credits = {}
-        self.confirmations = {}
-        self.denys = {}
+        self.confirms = {}
+        self.cancels = {}
 
 
 class IPv8PendingMessage:
