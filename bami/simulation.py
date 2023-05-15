@@ -207,5 +207,5 @@ class BamiSimulation(TaskManager):
             peer_id = get_peer_id(peer.overlay.my_peer)
             print("- [Peer:" + peer_id + "] --->", len(peer.overlay.messages))
             for k, v in peer.overlay.messages.items():
-                print("     MSG_ID:", v.payload.msg_id, "APPLICANT:", v.payload.applicant_id,
-                      "EVENT:", v.payload.sn_e, "INFO:", v.payload.event_info)
+                print("     MSG_ID:", v.payload.msg_id, "APPLICANT:", v.payload.applicant_id, "EVENT:", v.payload.sn_e,
+                      k)

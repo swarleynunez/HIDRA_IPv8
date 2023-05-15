@@ -51,8 +51,9 @@ class HIDRACommunity(Community):
         self.next_sn_m = 0
 
         # Other
-        self.r1_lock = asyncio.Lock()
-        self.r2_lock = asyncio.Lock()
+        self.sn_m_lock = asyncio.Lock()
+        self.sn_r_lock_1 = asyncio.Lock()
+        self.sn_r_lock_2 = asyncio.Lock()
 
         # Message handlers
         self.add_message_handler(REQUEST_RESOURCE_INFO, self.on_request_resource_info)
@@ -147,17 +148,17 @@ class HIDRACommunity(Community):
     @lazy_wrapper(LockingSendPayload)
     async def on_locking_send(self, sender, payload) -> None:
         await self.process_pending_messages()
-        self.process_locking_send_message(sender, payload)
+        await self.process_locking_send_message(sender, payload)
 
     @lazy_wrapper(LockingEchoPayload)
     async def on_locking_echo(self, sender, payload) -> None:
         await self.process_pending_messages()
-        self.process_locking_echo_message(sender, payload)
+        await self.process_locking_echo_message(sender, payload)
 
     @lazy_wrapper(LockingReadyPayload)
     async def on_locking_ready(self, sender, payload) -> None:
         await self.process_pending_messages()
-        self.process_locking_ready_message(sender, payload)
+        await self.process_locking_ready_message(sender, payload)
 
     @lazy_wrapper(LockingCreditPayload)
     async def on_locking_credit(self, sender, payload) -> None:
@@ -167,27 +168,27 @@ class HIDRACommunity(Community):
     @lazy_wrapper(ReservationEchoPayload)
     async def on_reservation_echo(self, sender, payload) -> None:
         await self.process_pending_messages()
-        self.process_reservation_echo_message(sender, payload)
+        await self.process_reservation_echo_message(sender, payload)
 
     @lazy_wrapper(ReservationCancelPayload)
     async def on_reservation_cancel(self, sender, payload) -> None:
         await self.process_pending_messages()
-        self.process_reservation_cancel_message(sender, payload)
+        await self.process_reservation_cancel_message(sender, payload)
 
     @lazy_wrapper(ReservationReadyPayload)
     async def on_reservation_ready(self, sender, payload) -> None:
         await self.process_pending_messages()
-        self.process_reservation_ready_message(sender, payload)
+        await self.process_reservation_ready_message(sender, payload)
 
     @lazy_wrapper(ReservationCreditPayload)
     async def on_reservation_credit(self, sender, payload) -> None:
         await self.process_pending_messages()
-        self.process_reservation_credit_message(sender, payload)
+        await self.process_reservation_credit_message(sender, payload)
 
     @lazy_wrapper(EventConfirmPayload)
     async def on_event_confirm(self, sender, payload) -> None:
         await self.process_pending_messages()
-        self.process_event_confirm_message(sender, payload)
+        await self.process_event_confirm_message(sender, payload)
 
     @lazy_wrapper(EventCancelPayload)
     async def on_event_cancel(self, sender, payload) -> None:
@@ -306,29 +307,31 @@ class HIDRACommunity(Community):
 
         # Applicant sends LockingSend messages to its parent domain
         for peer in self.domains[self.parent_domain_id]:
-            self.ez_send(peer, LockingSendPayload(sn_e, event.info))
+            self.ez_send(peer, LockingSendPayload(self.my_peer_id, sn_e, event.info))
 
     # APPLICANT PARENT DOMAIN
-    def process_locking_send_message(self, sender, payload) -> None:
-        sender_id = get_peer_id(sender)
-        event_id = get_object_id(sender_id, payload.sn_e)
-        applicant = self.peers[sender_id]
+    async def process_locking_send_message(self, sender, payload) -> None:
+        event_id = get_object_id(payload.applicant_id, payload.sn_e)
+        applicant = self.peers[payload.applicant_id]
         deposit = payload.event_info.t_exec_value * payload.event_info.p_ratio_value
 
         # Requirements
         if self.exist_event(event_id) and self.events[event_id].locking_echo_ok:
+            print("PIERDO1:", self.my_peer_id, payload.applicant_id, payload.sn_e, applicant.info.sn_e)
             # Dismiss the message...
             return
         if payload.sn_e > applicant.info.sn_e:
-            self.add_pending_message(sender, payload)
+            # print("ENTRO1:", self.my_peer_id, payload.sn_e, applicant.info.sn_e)
+            await self.add_pending_message(sender, payload)
             return
         elif payload.sn_e < applicant.info.sn_e:
             # Dismiss the message...
+            print("PIERDO2:", self.my_peer_id, payload.applicant_id, payload.sn_e, applicant.info.sn_e)
             return
         if deposit > self.get_available_balance(applicant):
-            print("[" + format(get_event_loop().time(), ".3f") + "] INFO ---> Applicant:" + sender_id +
+            print("[" + format(get_event_loop().time(), ".3f") + "] INFO ---> Applicant:" + payload.applicant_id +
                   " does not have enough balance for Event:" + str(payload.sn_e))
-            self.add_pending_message(sender, payload)
+            await self.add_pending_message(sender, payload)
             return
 
         # Update storage
@@ -345,23 +348,23 @@ class HIDRACommunity(Community):
                   "][Peer:" + self.my_peer_id +
                   "] Sending LockingEcho ---> " +
                   "Domain:" + str(self.parent_domain_id) +
-                  ", Applicant:" + sender_id +
+                  ", Applicant:" + payload.applicant_id +
                   ", Event:" + str(payload.sn_e) +
                   ", Deposit:" + str(deposit))
 
         # Applicant parent domain sends LockingEcho messages to itself
         self.events[event_id].locking_echo_ok = True
         for peer in self.domains[self.parent_domain_id]:
-            self.ez_send(peer, LockingEchoPayload(sender_id, payload.sn_e, payload.event_info))
+            self.ez_send(peer, LockingEchoPayload(payload.applicant_id, payload.sn_e, payload.event_info))
 
     # APPLICANT PARENT DOMAIN
-    def process_locking_echo_message(self, sender, payload) -> None:
+    async def process_locking_echo_message(self, sender, payload) -> None:
         event_id = get_object_id(payload.applicant_id, payload.sn_e)
         sender_id = get_peer_id(sender)
 
         # Requirements
         if not self.exist_event(event_id):
-            self.add_pending_message(sender, payload)
+            await self.add_pending_message(sender, payload)
             return
         event = self.events[event_id]
         if sender_id in event.locking_echos or event.locking_ready_ok:
@@ -392,13 +395,13 @@ class HIDRACommunity(Community):
                 self.ez_send(peer, LockingReadyPayload(payload.applicant_id, payload.sn_e, payload.event_info))
 
     # APPLICANT PARENT DOMAIN
-    def process_locking_ready_message(self, sender, payload) -> None:
+    async def process_locking_ready_message(self, sender, payload) -> None:
         event_id = get_object_id(payload.applicant_id, payload.sn_e)
         sender_id = get_peer_id(sender)
 
         # Requirements
         if not self.exist_event(event_id):
-            self.add_pending_message(sender, payload)
+            await self.add_pending_message(sender, payload)
             return
         event = self.events[event_id]
         if sender_id in event.locking_readys or event.locking_credit_ok:
@@ -481,7 +484,7 @@ class HIDRACommunity(Community):
                 solver = self.peers[solver_id]
 
                 # Next reservation sequence number (accessed via mutex)
-                async with self.r1_lock:
+                async with self.sn_r_lock_1:
                     sn_r = solver.info.sn_r
                     solver.info.sn_r += 1
 
@@ -510,13 +513,15 @@ class HIDRACommunity(Community):
                     solver = self.peers[solver_id]
 
                     # Next reservation sequence number (accessed via mutex)
-                    async with self.r2_lock:
+                    async with self.sn_r_lock_2:
                         # Payload data
                         # Peers vote YES/NO on the reservation sequence number received from the Solver
                         sn_r = int(event.reservation_echos[solver_id].split(":")[2])
                         vote = sn_r == solver.info.sn_r
                         if vote:
                             solver.info.sn_r += 1
+                        else:
+                            print("FALSE:", self.my_peer_id, payload.applicant_id, payload.sn_e, sn_r, solver.info.sn_r)
 
                     # Debug
                     if self.settings.message_debug:
@@ -540,16 +545,16 @@ class HIDRACommunity(Community):
                     # Cleaning of stuck pending messages due to the amplification step
                     if not event.reservation_credit_ok:
                         del event.locking_credits[sender_id]
-                        self.add_pending_message(sender, payload)
+                        await self.add_pending_message(sender, payload)
 
     # SOLVER PARENT DOMAIN
-    def process_reservation_echo_message(self, sender, payload) -> None:
+    async def process_reservation_echo_message(self, sender, payload) -> None:
         event_id = get_object_id(payload.applicant_id, payload.sn_e)
         sender_id = get_peer_id(sender)
 
         # Requirements
         if not self.exist_event(event_id) or not self.events[event_id].info:
-            self.add_pending_message(sender, payload)
+            await self.add_pending_message(sender, payload)
             return
         event = self.events[event_id]
         if sender_id in event.reservation_echos or event.reservation_ready_ok:
@@ -557,11 +562,11 @@ class HIDRACommunity(Community):
             return
         solver_id = event.info.solver_id
         if len(event.reservation_echos) == 0 and sender_id != solver_id:
-            self.add_pending_message(sender, payload)
+            await self.add_pending_message(sender, payload)
             return
         solver = self.peers[solver_id]
         if payload.sn_r > solver.next_sn_r:
-            self.add_pending_message(sender, payload)
+            await self.add_pending_message(sender, payload)
             return
 
         # Format message data
@@ -635,11 +640,15 @@ class HIDRACommunity(Community):
                 self.ez_send(peer, ReservationReadyPayload(payload.applicant_id, payload.sn_e, payload.sn_r))
 
     # APPLICANT PARENT DOMAIN
-    def process_reservation_cancel_message(self, sender, payload) -> None:
+    async def process_reservation_cancel_message(self, sender, payload) -> None:
+        event_id = get_object_id(payload.applicant_id, payload.sn_e)
         sender_id = get_peer_id(sender)
-        event = self.events[get_object_id(payload.applicant_id, payload.sn_e)]
 
         # Requirements
+        if not self.exist_event(event_id):
+            await self.add_pending_message(sender, payload)
+            return
+        event = self.events[event_id]
         if sender_id in event.reservation_cancels or event.reservation_cancel_ok:
             # Dismiss the message...
             return
@@ -657,13 +666,13 @@ class HIDRACommunity(Community):
             del self.peers[payload.applicant_id].deposits[payload.sn_e]
 
     # SOLVER PARENT DOMAIN
-    def process_reservation_ready_message(self, sender, payload) -> None:
+    async def process_reservation_ready_message(self, sender, payload) -> None:
         event_id = get_object_id(payload.applicant_id, payload.sn_e)
         sender_id = get_peer_id(sender)
 
         # Requirements
         if not self.exist_event(event_id) or not self.events[event_id].info:
-            self.add_pending_message(sender, payload)
+            await self.add_pending_message(sender, payload)
             return
         event = self.events[event_id]
         if sender_id in event.reservation_readys or event.reservation_credit_ok:
@@ -746,13 +755,13 @@ class HIDRACommunity(Community):
                 self.ez_send(peer, ReservationCreditPayload(payload.applicant_id, payload.sn_e))
 
     # APPLICANT PARENT DOMAIN
-    def process_reservation_credit_message(self, sender, payload) -> None:
+    async def process_reservation_credit_message(self, sender, payload) -> None:
         event_id = get_object_id(payload.applicant_id, payload.sn_e)
         sender_id = get_peer_id(sender)
 
         # Requirements
-        if not self.exist_event(event_id) or not self.events[event_id].info:
-            self.add_pending_message(sender, payload)
+        if not self.exist_event(event_id):
+            await self.add_pending_message(sender, payload)
             return
         event = self.events[event_id]
         if sender_id in event.reservation_credits or event.confirm_ok:
@@ -783,11 +792,15 @@ class HIDRACommunity(Community):
                 self.ez_send(peer, EventConfirmPayload(payload.applicant_id, payload.sn_e))
 
     # APPLICANT PARENT DOMAIN
-    def process_event_confirm_message(self, sender, payload) -> None:
+    async def process_event_confirm_message(self, sender, payload) -> None:
+        event_id = get_object_id(payload.applicant_id, payload.sn_e)
         sender_id = get_peer_id(sender)
-        event = self.events[get_object_id(payload.applicant_id, payload.sn_e)]
 
         # Requirements
+        if not self.exist_event(event_id):
+            await self.add_pending_message(sender, payload)
+            return
+        event = self.events[event_id]
         if sender_id in event.confirms:
             # Dismiss the message...
             return
@@ -811,13 +824,18 @@ class HIDRACommunity(Community):
     ############
     # Messages #
     ############
-    def add_pending_message(self, sender, payload) -> None:
+    async def add_pending_message(self, sender, payload) -> None:
         # Get the next message ID
-        message_id = get_object_id(self.my_peer_id, self.next_sn_m)
-        self.next_sn_m += 1
+        async with self.sn_m_lock:
+            message_id = get_object_id(self.my_peer_id, self.next_sn_m)
+            self.next_sn_m += 1
 
         # Update storage
-        self.messages[message_id] = IPv8PendingMessage(sender, payload)
+        if message_id in self.messages:
+            print("REPETIDO! ANTES:", self.my_peer_id, message_id, self.messages[message_id].payload)
+            print("REPETIDO! DESPUÉS:", self.my_peer_id, message_id, payload)
+        else:
+            self.messages[message_id] = IPv8PendingMessage(sender, payload)
 
     async def process_pending_messages(self):
         for k, v in list(self.messages.items()):
@@ -826,19 +844,23 @@ class HIDRACommunity(Community):
 
             # Depending on the message type...
             if v.payload.msg_id == LOCKING_SEND:
-                self.process_locking_send_message(v.sender, v.payload)
+                await self.process_locking_send_message(v.sender, v.payload)
             elif v.payload.msg_id == LOCKING_ECHO:
-                self.process_locking_echo_message(v.sender, v.payload)
+                await self.process_locking_echo_message(v.sender, v.payload)
             elif v.payload.msg_id == LOCKING_READY:
-                self.process_locking_ready_message(v.sender, v.payload)
+                await self.process_locking_ready_message(v.sender, v.payload)
             elif v.payload.msg_id == LOCKING_CREDIT:
                 await self.process_locking_credit_message(v.sender, v.payload)
             elif v.payload.msg_id == RESERVATION_ECHO:
-                self.process_reservation_echo_message(v.sender, v.payload)
+                await self.process_reservation_echo_message(v.sender, v.payload)
+            elif v.payload.msg_id == RESERVATION_CANCEL:
+                await self.process_reservation_cancel_message(v.sender, v.payload)
             elif v.payload.msg_id == RESERVATION_READY:
-                self.process_reservation_ready_message(v.sender, v.payload)
+                await self.process_reservation_ready_message(v.sender, v.payload)
             elif v.payload.msg_id == RESERVATION_CREDIT:
-                self.process_reservation_credit_message(v.sender, v.payload)
+                await self.process_reservation_credit_message(v.sender, v.payload)
+            elif v.payload.msg_id == EVENT_CONFIRM:
+                await self.process_event_confirm_message(v.sender, v.payload)
 
     ############
     # Checkers #

@@ -77,6 +77,7 @@ class LockingSendPayload:
     Payload for HIDRA's 'LockingSend' messages
     """
 
+    applicant_id: str
     sn_e: int
     event_info: bytes
 
