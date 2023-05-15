@@ -5,16 +5,16 @@ from typing import Optional
 @dataclass
 class SimulationSettings:
     # Number of HIDRA domains
-    domains: int = 2
+    domains: int = 5
 
     # Number of IPv8 peers per HIDRA domain
-    peers_per_domain = 10
+    peers_per_domain: int = 5
 
     # Number of IPv8 peers
     peers: int = domains * peers_per_domain
 
     # Maximum number of faulty peers per domain
-    faulty_peers = peers_per_domain // 3
+    faulty_peers: int = peers_per_domain // 3
 
     # The name of the experiment
     name: str = ""
@@ -26,7 +26,7 @@ class SimulationSettings:
     identifier: Optional[str] = None
 
     # The duration of the simulation in seconds
-    duration: int = 60
+    duration: int = 180
 
     # The logging level during the experiment
     logging_level: str = "INFO"

@@ -168,7 +168,6 @@ class ReservationEchoPayload:
     sn_e: int
     sn_r: int
     vote: bool
-    number: int
 
 
 @dataclass(msg_id=RESERVATION_CANCEL)
@@ -200,7 +199,6 @@ class ReservationCreditPayload:
 
     applicant_id: str
     sn_e: int
-    sn_r: int
 
 
 @dataclass(msg_id=EVENT_CONFIRM)

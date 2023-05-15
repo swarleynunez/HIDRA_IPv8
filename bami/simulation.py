@@ -8,8 +8,6 @@ from asyncio import sleep
 from typing import Optional
 
 import yappi
-from matplotlib import pyplot as plt
-from matplotlib.ticker import MaxNLocator
 
 from hidra.community import HIDRACommunity
 from pyipv8.ipv8.messaging.interfaces.statistics_endpoint import StatisticsEndpoint
@@ -21,7 +19,6 @@ from pyipv8.simulation.discrete_loop import DiscreteLoop
 from pyipv8.simulation.simulation_endpoint import SimulationEndpoint
 
 from bami.settings import SimulationSettings
-from hidra.settings import HIDRASettings
 from hidra.utils import get_peer_id
 
 
@@ -60,8 +57,7 @@ class BamiSimulation(TaskManager):
     async def start_ipv8_nodes(self) -> None:
         for peer_id in range(1, self.settings.peers + 1):
             if peer_id % 100 == 0:
-                pass
-                # print("Created %d peers..." % peer_id)
+                print("Created %d peers..." % peer_id)
 
             endpoint = SimulationEndpoint()
             config = self.get_ipv8_builder(peer_id)
@@ -115,7 +111,7 @@ class BamiSimulation(TaskManager):
 
         await sleep(5)  # Make sure peers have time to discover each other
 
-        # print("IPv8 peer discovery complete")
+        print("IPv8 peer discovery complete")
 
     def apply_latencies(self):
         """
@@ -129,7 +125,7 @@ class BamiSimulation(TaskManager):
             for line in latencies_file.readlines():
                 latencies.append([float(l) for l in line.strip().split(",")])
 
-        # print("Read latency matrix with %d sites!" % len(latencies))
+        print("Read latency matrix with %d sites!" % len(latencies))
 
         # Assign nodes to sites in a round-robin fashion and apply latencies accordingly
         for from_ind, from_node in enumerate(self.nodes):
@@ -139,17 +135,17 @@ class BamiSimulation(TaskManager):
                 latency_ms = int(latencies[from_site_ind][to_site_ind]) / 1000
                 from_node.endpoint.latencies[to_node.endpoint.wan_address] = latency_ms
 
-        # print("Latencies applied!")
+        print("Latencies applied!")
 
     async def start_simulation(self) -> None:
-        # print("Starting simulation with %d peers..." % self.settings.peers)
+        print("Starting simulation with %d peers..." % self.settings.peers)
 
         if self.settings.profile:
             yappi.start(builtins=True)
 
         start_time = time.time()
         await asyncio.sleep(self.settings.duration)
-        # print("Simulation took %f seconds" % (time.time() - start_time))
+        print("Simulation took %f seconds" % (time.time() - start_time))
 
         if self.settings.profile:
             yappi.stop()
@@ -174,20 +170,7 @@ class BamiSimulation(TaskManager):
         """
 
         # HIDRA
-        # self.print_final_statistics()
-        for peer in self.nodes:
-            peer_id = get_peer_id(peer.overlay.my_peer)
-            print("--- VISTA DE", peer_id, "---")
-            for k, v in peer.overlay.messages.items():
-                print("APPLICANT:", v.payload.applicant_id,
-                      "EVENT:", v.payload.sn_e,
-                      "MSG_ID", v.payload.msg_id)
-            # for k, v in peer.overlay.events.items():
-            #     print(k, v.locking_credits, v.reservation_echos)
-            # print("\n")
-            for k, v in peer.overlay.peers.items():
-                print(k, v.info, v.deposits, v.next_sn_r, v.reservations)
-            print("\n")
+        self.print_final_statistics()
 
     async def run(self) -> None:
         self.setup_directories()
@@ -196,7 +179,7 @@ class BamiSimulation(TaskManager):
         await self.ipv8_discover_peers()
         self.apply_latencies()
         await self.on_ipv8_ready()
-        # print("Simulation setup took %f seconds" % (time.time() - start_time))
+        print("Simulation setup took %f seconds" % (time.time() - start_time))
         await self.start_simulation()
         self.on_simulation_finished()
 
@@ -206,101 +189,23 @@ class BamiSimulation(TaskManager):
     # HIDRA #
     #########
     def print_final_statistics(self):
-        self.print_peers()
-        self.print_events()
-        self.print_containers()
-        self.print_messages()
-        if HIDRASettings.enable_free_rider:
-            self.print_experiments()
+        self.print_local_state()
+        self.print_pending_messages()
 
-    def print_peers(self):
-        print("\n-------------------- Peers ---------------------")
+    def print_local_state(self):
+        print("\n----------------- Local state ------------------")
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
-            print("[" + peer_id + "]:")
-            print(" - PubKey:", peer.overlay.my_peer.public_key.key.pk.hex())
+            print("- [Peer:" + peer_id + "] --->")
+            for k, v in peer.overlay.peers.items():
+                if v.info.sn_e > 0:
+                    print("     [Peer:" + k + "]", v.next_sn_r, v.info, v.deposits, v.reservations)
 
-    def print_events(self):
-        print("\n-------------------- Events --------------------")
-        faulty_peers = SimulationSettings.faulty_peers
+    def print_pending_messages(self):
+        print("\n--------------- Pending messages ---------------")
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
-            print("[" + peer_id + "]:")
-            if peer.overlay.e_count == 0:
-                print(" - Empty")
-                continue
-            for k, v in peer.overlay.events.items():
-                # Dismiss unfinished events due to the end of the simulation
-                if len(peer.overlay.messages) == 0 and len(v.ack_signatures) < 2 * faulty_peers + 1:
-                    peer.overlay.ne_msg_count -= 1
-                    peer.overlay.er_msg_count -= len(v.ack_signatures)
-                    continue
-                if v.applicant == peer_id:
-                    print(" - EID=" + str(k), v.start_time, v.container_id, v.end_time)
-
-    def print_containers(self):
-        print("\n------------------ Containers ------------------")
-        for peer in self.nodes:
-            peer_id = get_peer_id(peer.overlay.my_peer)
-            print("[" + peer_id + "]:")
-            c_count = 0
-            for k, v in peer.overlay.containers.items():
-                if v.host == peer_id:
-                    c_count += 1
-                    print(" - CID=" + str(k), v.image_tag)
-            if c_count == 0:
-                print(" - Empty")
-
-    def print_messages(self):
-        print("\n------------------- Messages -------------------")
-        pi_count = e_count = ne_count = er_count = eco_count = esr_count = ed_count = 0
-        peers_count = SimulationSettings.peers
-        fanout = SimulationSettings.peers_per_domain
-        if fanout > peers_count:
-            fanout = peers_count
-        faulty_peers = SimulationSettings.faulty_peers
-        for peer in self.nodes:
-            pi_count += peer.overlay.pi_msg_count
-            e_count += peer.overlay.e_count
-            ne_count += peer.overlay.ne_msg_count
-            er_count += peer.overlay.er_msg_count
-            eco_count += peer.overlay.eco_msg_count
-            esr_count += peer.overlay.ecr_msg_count
-            ed_count += peer.overlay.ed_msg_count
-        print("HIDRA events sent:", e_count,
-              "\n - 'PeerInit' messages received:", pi_count, "of", (peers_count * (peers_count - 1)),
-              "\n - 'NewEvent' messages received:", ne_count, "of", fanout * e_count,
-              "\n - 'EventReply' messages received:", er_count, "of", (2 * faulty_peers + 1) * e_count,
-              "\n - 'EventCommit' messages received:", eco_count, "of", fanout * e_count,
-              "\n - 'EventCredit' messages received:", esr_count,
-              "\n - 'EventDelivery' messages received:", ed_count, "of", fanout * e_count)
-
-    def print_experiments(self):
-        print("\n----------------- Experiments -----------------")
-        print("😈 [" + str(self.nodes[0].overlay.free_rider) + "] 😈")
-
-        ################
-        # Experiment 1 #
-        ################
-        # Data
-        first_honest = True
-        fig, ax = plt.subplots()
-        for peer in self.nodes:
-            if get_peer_id(peer.overlay.my_peer) == peer.overlay.free_rider:
-                ax.plot(peer.overlay.ex1_containers, color="red", label="Free-rider peer", linewidth=2)
-            else:
-                if first_honest:
-                    first_honest = False
-                    ax.plot(peer.overlay.ex1_containers, color="green", label="Honest peers")
-                else:
-                    ax.plot(peer.overlay.ex1_containers, color="green")
-
-        # Style
-        ax.set_xlabel('Number of orchestration events', fontweight="bold")
-        ax.set_ylabel('Number of containers', fontweight="bold")
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.legend(loc="upper center", bbox_to_anchor=(0, 1, 1, 0.12), ncol=2)
-
-        # Get plot
-        plt.grid(True, alpha=0.5)
-        plt.show()
+            print("- [Peer:" + peer_id + "] --->", len(peer.overlay.messages))
+            for k, v in peer.overlay.messages.items():
+                print("     MSG_ID:", v.payload.msg_id, "APPLICANT:", v.payload.applicant_id,
+                      "EVENT:", v.payload.sn_e, "INFO:", v.payload.event_info)

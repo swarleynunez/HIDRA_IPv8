@@ -15,8 +15,8 @@ class HIDRAPeerInfo:
     def __init__(self, balance: int, r_max: int, sn_e: int, sn_r: int):
         self.balance = balance
         self.r_max = r_max
-        self.sn_e = sn_e  # Last offloading event used/seen
-        self.sn_r = sn_r  # Last resource reservation used/seen
+        self.sn_e = sn_e
+        self.sn_r = sn_r
 
     def __str__(self):
         return str(self.balance) + ":" + \
@@ -33,7 +33,6 @@ class HIDRAPeer:
     def __init__(self):
         self.info: HIDRAPeerInfo = None
         self.resource_replies = {}
-        self.next_sn_e = 0  # Next offloading event expected to be received
         self.deposits = {}
         self.next_sn_r = 0  # Next resource reservation expected to be received
         self.reservations = {}
@@ -108,7 +107,6 @@ class HIDRAEvent:
         self.locking_readys = {}
         self.locking_credits = {}
         self.reservation_echos = {}
-        self.reservation_echos2 = {}
         self.reservation_readys = {}
         self.reservation_cancels = {}
         self.reservation_credits = {}
