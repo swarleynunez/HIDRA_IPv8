@@ -28,8 +28,14 @@ RESERVATION_CREDIT = 10
 EVENT_CONFIRM = 11
 EVENT_CANCEL = 12
 
-
 # WEP
+MONITORING_REQUEST = 13
+MONITORING_RESPONSE = 14
+MONITORING_RESULT = 15
+MONITORING_SEND = 16
+MONITORING_ECHO = 17
+MONITORING_CREDIT = 18
+
 
 @dataclass(msg_id=REQUEST_RESOURCE_INFO)
 class RequestResourceInfoPayload:
@@ -37,6 +43,7 @@ class RequestResourceInfoPayload:
     Payload for HIDRA's 'RequestResourceInfo' messages
     """
 
+    applicant_id: str
     sn_e: int
     event_info: bytes
 
@@ -46,7 +53,10 @@ class RequestResourceInfoPayload:
 
     @classmethod
     def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
-        return HIDRAEventInfo(**json.loads(serialized_obj.decode("utf-8")))
+        d = json.loads(serialized_obj.decode("utf-8"))
+        event_info = HIDRAEventInfo(**d)
+        event_info.workload = HIDRAWorkload(**d["workload"])
+        return event_info
 
 
 @dataclass(msg_id=RESOURCE_INFO)
@@ -55,6 +65,7 @@ class ResourceInfoPayload:
     Payload for HIDRA's 'ResourceInfo' messages
     """
 
+    applicant_id: str
     sn_e: int
     available: bool
     resource_replies: bytes
@@ -169,6 +180,41 @@ class ReservationEchoPayload:
     sn_e: int
     sn_r: int
     vote: bool
+    event_info: bytes
+
+    @staticmethod
+    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
+        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
+        d = json.loads(serialized_obj.decode("utf-8"))
+        event_info = HIDRAEventInfo(**d)
+        event_info.workload = HIDRAWorkload(**d["workload"])
+        return event_info
+
+
+@dataclass(msg_id=RESERVATION_READY)
+class ReservationReadyPayload:
+    """
+    Payload for HIDRA's 'ReservationReady' messages
+    """
+
+    applicant_id: str
+    sn_e: int
+    sn_r: int
+    event_info: bytes
+
+    @staticmethod
+    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
+        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
+        d = json.loads(serialized_obj.decode("utf-8"))
+        event_info = HIDRAEventInfo(**d)
+        event_info.workload = HIDRAWorkload(**d["workload"])
+        return event_info
 
 
 @dataclass(msg_id=RESERVATION_CANCEL)
@@ -181,17 +227,6 @@ class ReservationCancelPayload:
     sn_e: int
 
 
-@dataclass(msg_id=RESERVATION_READY)
-class ReservationReadyPayload:
-    """
-    Payload for HIDRA's 'ReservationReady' messages
-    """
-
-    applicant_id: str
-    sn_e: int
-    sn_r: int
-
-
 @dataclass(msg_id=RESERVATION_CREDIT)
 class ReservationCreditPayload:
     """
@@ -200,6 +235,19 @@ class ReservationCreditPayload:
 
     applicant_id: str
     sn_e: int
+    sn_r: int
+    event_info: bytes
+
+    @staticmethod
+    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
+        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
+        d = json.loads(serialized_obj.decode("utf-8"))
+        event_info = HIDRAEventInfo(**d)
+        event_info.workload = HIDRAWorkload(**d["workload"])
+        return event_info
 
 
 @dataclass(msg_id=EVENT_CONFIRM)
@@ -210,12 +258,88 @@ class EventConfirmPayload:
 
     applicant_id: str
     sn_e: int
+    event_info: bytes
+
+    @staticmethod
+    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
+        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
+        d = json.loads(serialized_obj.decode("utf-8"))
+        event_info = HIDRAEventInfo(**d)
+        event_info.workload = HIDRAWorkload(**d["workload"])
+        return event_info
 
 
 @dataclass(msg_id=EVENT_CANCEL)
 class EventCancelPayload:
     """
     Payload for HIDRA's 'EventCancel' messages
+    """
+
+    applicant_id: str
+    sn_e: int
+    solver_id: str
+    sn_r: int
+
+
+@dataclass(msg_id=MONITORING_REQUEST)
+class MonitoringRequestPayload:
+    """
+    Payload for HIDRA's 'MonitoringRequest' messages
+    """
+
+    applicant_id: str
+    sn_e: int
+
+
+@dataclass(msg_id=MONITORING_RESPONSE)
+class MonitoringResponsePayload:
+    """
+    Payload for HIDRA's 'MonitoringResponse' messages
+    """
+
+    applicant_id: str
+    sn_e: int
+    response: bool
+
+
+@dataclass(msg_id=MONITORING_RESULT)
+class MonitoringResultPayload:
+    """
+    Payload for HIDRA's 'MonitoringResult' messages
+    """
+
+    applicant_id: str
+    sn_e: int
+    ts_end: str
+
+
+@dataclass(msg_id=MONITORING_SEND)
+class MonitoringSendPayload:
+    """
+    Payload for HIDRA's 'MonitoringSend' messages
+    """
+
+    applicant_id: str
+    sn_e: int
+
+
+@dataclass(msg_id=MONITORING_ECHO)
+class MonitoringEchoPayload:
+    """
+    Payload for HIDRA's 'MonitoringEcho' messages
+    """
+
+    applicant_id: str
+    sn_e: int
+
+
+@dataclass(msg_id=MONITORING_CREDIT)
+class MonitoringCreditPayload:
+    """
+    Payload for HIDRA's 'MonitoringCredit' messages
     """
 
     applicant_id: str

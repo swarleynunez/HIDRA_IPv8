@@ -199,7 +199,8 @@ class BamiSimulation(TaskManager):
             print("- [Peer:" + peer_id + "] --->")
             for k, v in peer.overlay.peers.items():
                 if v.info.sn_e > 0:
-                    print("     [Peer:" + k + "]", v.next_sn_r, v.info, v.deposits, v.reservations)
+                    print("     [Peer:" + k + "]", v.next_sn_r, v.info,
+                          dict(sorted(v.deposits.items())), dict(sorted(v.reservations.items())))
 
     def print_pending_messages(self):
         print("\n--------------- Pending messages ---------------")
@@ -207,5 +208,4 @@ class BamiSimulation(TaskManager):
             peer_id = get_peer_id(peer.overlay.my_peer)
             print("- [Peer:" + peer_id + "] --->", len(peer.overlay.messages))
             for k, v in peer.overlay.messages.items():
-                print("     MSG_ID:", v.payload.msg_id, "APPLICANT:", v.payload.applicant_id, "EVENT:", v.payload.sn_e,
-                      k)
+                print("     MSG_ID:", v.payload.msg_id, "APPLICANT:", v.payload.applicant_id, "EVENT:", v.payload.sn_e)

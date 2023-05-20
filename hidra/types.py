@@ -3,8 +3,9 @@ from typing import Any
 
 from pyipv8.ipv8.peer import Peer
 
+
 # Enumerations (SECONDS, MINUTES, HOURS, WEEKS)
-TimeUnit = Enum('TimeUnit', ['S', 'M', 'H', 'W'])
+# TimeUnit = Enum('TimeUnit', ['S', 'M', 'H', 'W'])
 
 
 class HIDRAPeerInfo:
@@ -103,6 +104,7 @@ class HIDRAEvent:
         self.reservation_credit_ok = False
         self.confirm_ok = False
         self.cancel_ok = False
+        self.wrp_ok = False
         self.locking_echos = {}
         self.locking_readys = {}
         self.locking_credits = {}
@@ -112,6 +114,12 @@ class HIDRAEvent:
         self.reservation_credits = {}
         self.confirms = {}
         self.cancels = {}
+
+        # Local info: WEP
+        self.failed_requests = 0
+        self.monitoring_result_ok = False
+        self.wep_ok = False
+        self.monitoring_results = {}
 
 
 class IPv8PendingMessage:

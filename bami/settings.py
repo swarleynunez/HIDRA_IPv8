@@ -26,7 +26,7 @@ class SimulationSettings:
     identifier: Optional[str] = None
 
     # The duration of the simulation in seconds
-    duration: int = 180
+    duration: int = 600
 
     # The logging level during the experiment
     logging_level: str = "INFO"
