@@ -1,4 +1,3 @@
-from enum import Enum
 from typing import Any
 
 from pyipv8.ipv8.peer import Peer
@@ -61,7 +60,7 @@ class HIDRAEventInfo:
     """
 
     def __init__(self, from_domain_id: int, to_domain_id: int, solver_id: str, workload: HIDRAWorkload,
-                 t_exec_value: int, p_ratio_value: int, ts_start: int):
+                 t_exec_value: int, p_ratio_value: int, ts_start: float):
         self.from_domain_id = from_domain_id
         self.to_domain_id = to_domain_id
         self.solver_id = solver_id
@@ -118,8 +117,13 @@ class HIDRAEvent:
         # Local info: WEP
         self.failed_requests = 0
         self.monitoring_result_ok = False
+        self.monitoring_send_ok = False
+        self.monitoring_echo_ok = False
+        self.monitoring_credit_ok = False
         self.wep_ok = False
         self.monitoring_results = {}
+        self.monitoring_echos = {}
+        self.monitoring_credits = {}
 
 
 class IPv8PendingMessage:

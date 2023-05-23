@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import random
 import shutil
 import time
 from asyncio import sleep
@@ -102,7 +101,8 @@ class BamiSimulation(TaskManager):
 
     async def ipv8_discover_peers(self) -> None:
         for node_a in self.nodes:
-            connect_nodes = random.sample(self.nodes, min(100, len(self.nodes)))
+            # connect_nodes = random.sample(self.nodes, min(100, len(self.nodes)))
+            connect_nodes = self.nodes
             for node_b in connect_nodes:
                 if node_a == node_b:
                     continue
@@ -183,12 +183,13 @@ class BamiSimulation(TaskManager):
         await self.start_simulation()
         self.on_simulation_finished()
 
-        await sleep(5)  # To avoid asyncio errors
+        await sleep(1)  # To avoid asyncio errors
 
     #########
     # HIDRA #
     #########
     def print_final_statistics(self):
+        pass
         self.print_local_state()
         self.print_pending_messages()
 
@@ -198,7 +199,7 @@ class BamiSimulation(TaskManager):
             peer_id = get_peer_id(peer.overlay.my_peer)
             print("- [Peer:" + peer_id + "] --->")
             for k, v in peer.overlay.peers.items():
-                if v.info.sn_e > 0:
+                if v.info.sn_e > 0 or v.info.sn_r > 0:
                     print("     [Peer:" + k + "]", v.next_sn_r, v.info,
                           dict(sorted(v.deposits.items())), dict(sorted(v.reservations.items())))
 

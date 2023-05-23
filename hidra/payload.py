@@ -202,7 +202,6 @@ class ReservationReadyPayload:
 
     applicant_id: str
     sn_e: int
-    sn_r: int
     event_info: bytes
 
     @staticmethod
@@ -235,7 +234,6 @@ class ReservationCreditPayload:
 
     applicant_id: str
     sn_e: int
-    sn_r: int
     event_info: bytes
 
     @staticmethod
@@ -281,7 +279,6 @@ class EventCancelPayload:
     applicant_id: str
     sn_e: int
     solver_id: str
-    sn_r: int
 
 
 @dataclass(msg_id=MONITORING_REQUEST)
@@ -314,6 +311,7 @@ class MonitoringResultPayload:
     applicant_id: str
     sn_e: int
     ts_end: str
+    signature: bytes
 
 
 @dataclass(msg_id=MONITORING_SEND)
@@ -324,6 +322,15 @@ class MonitoringSendPayload:
 
     applicant_id: str
     sn_e: int
+    monitoring_results: bytes
+
+    @staticmethod
+    def fix_pack_monitoring_results(dictionary: dict) -> bytes:
+        return json.dumps(dictionary).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_monitoring_results(cls, serialized_dict: bytes) -> dict:
+        return json.loads(serialized_dict.decode("utf-8"))
 
 
 @dataclass(msg_id=MONITORING_ECHO)
@@ -334,6 +341,15 @@ class MonitoringEchoPayload:
 
     applicant_id: str
     sn_e: int
+    monitoring_results: bytes
+
+    @staticmethod
+    def fix_pack_monitoring_results(dictionary: dict) -> bytes:
+        return json.dumps(dictionary).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_monitoring_results(cls, serialized_dict: bytes) -> dict:
+        return json.loads(serialized_dict.decode("utf-8"))
 
 
 @dataclass(msg_id=MONITORING_CREDIT)
@@ -344,3 +360,12 @@ class MonitoringCreditPayload:
 
     applicant_id: str
     sn_e: int
+    monitoring_results: bytes
+
+    @staticmethod
+    def fix_pack_monitoring_results(dictionary: dict) -> bytes:
+        return json.dumps(dictionary).encode("utf-8")
+
+    @classmethod
+    def fix_unpack_monitoring_results(cls, serialized_dict: bytes) -> dict:
+        return json.loads(serialized_dict.decode("utf-8"))

@@ -8,7 +8,7 @@ class SimulationSettings:
     domains: int = 5
 
     # Number of IPv8 peers per HIDRA domain
-    peers_per_domain: int = 5
+    peers_per_domain: int = 20
 
     # Number of IPv8 peers
     peers: int = domains * peers_per_domain
@@ -26,7 +26,7 @@ class SimulationSettings:
     identifier: Optional[str] = None
 
     # The duration of the simulation in seconds
-    duration: int = 600
+    duration: int = 180
 
     # The logging level during the experiment
     logging_level: str = "INFO"
