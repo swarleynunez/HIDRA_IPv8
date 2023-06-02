@@ -9,12 +9,6 @@ class HIDRASettings:
     # Object identifier size (in number of hexadecimal characters)
     object_id_size: int = 16
 
-    # Initial credits per peer
-    initial_balance: int = 240
-
-    # Initial resource units offer per peer
-    max_resources: int = 1024
-
     # Peers send offloading events to their parent domains (intra) or to other domains (inter)
     domain_selection_policy: str = "inter"
 
@@ -24,23 +18,29 @@ class HIDRASettings:
     # Delay between offloading events (in milliseconds)
     event_sending_delay: int = 0
 
+    # Initial credits per peer
+    initial_balance: int = 10 * events_per_peer
+
+    # Initial resource units offer per peer
+    max_resources: int = 1024 * events_per_peer
+
     # Timeout for resource replies to select Solvers (in seconds)
     ssp_timeout: int = 5
 
     # Timeout for credit locking and resource reservation (in seconds)
-    ts_start: int = 5
+    wrp_timeout: int = 5
 
     # Execution time of workloads (in seconds)
-    t_exec_value: int = 60
+    t_exec_value: int = 10
 
     # Payment (number of credits) per unit of time (second)
     p_ratio_value: int = 1
 
     # Monitoring requests sent per epoch
-    requests_per_epoch: int = 1
+    requests_per_epoch: int = 0
 
     # Failed monitoring requests threshold
-    failed_requests_threshold: int = 30
+    failed_requests_threshold: int = 5
 
     # Display messages exchanged during a run
     message_debug: bool = False

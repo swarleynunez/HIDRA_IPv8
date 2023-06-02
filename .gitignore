@@ -1,7 +1,8 @@
 ### Custom ###
-bami/data
-pyipv8
-tribler
+bami/data/
+experiments/
+pyipv8/
+wta-tools/
 
 # Created by https://www.toptal.com/developers/gitignore/api/macos,linux,windows,pycharm,python
 # Edit at https://www.toptal.com/developers/gitignore?templates=macos,linux,windows,pycharm,python

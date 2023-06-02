@@ -6,7 +6,10 @@ import time
 from asyncio import sleep
 from typing import Optional
 
+import numpy as np
 import yappi
+from matplotlib import pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 from hidra.community import HIDRACommunity
 from pyipv8.ipv8.messaging.interfaces.statistics_endpoint import StatisticsEndpoint
@@ -170,7 +173,7 @@ class BamiSimulation(TaskManager):
         """
 
         # HIDRA
-        self.print_final_statistics()
+        self.print_final_results()
 
     async def run(self) -> None:
         self.setup_directories()
@@ -188,10 +191,14 @@ class BamiSimulation(TaskManager):
     #########
     # HIDRA #
     #########
-    def print_final_statistics(self):
-        pass
+    def print_final_results(self):
+        # Debug
         self.print_local_state()
         self.print_pending_messages()
+        self.print_endpoint_statistics()
+
+        # Experiments
+        # self.experiment1()
 
     def print_local_state(self):
         print("\n----------------- Local state ------------------")
@@ -200,7 +207,7 @@ class BamiSimulation(TaskManager):
             print("- [Peer:" + peer_id + "] --->")
             for k, v in peer.overlay.peers.items():
                 if v.info.sn_e > 0 or v.info.sn_r > 0:
-                    print("     [Peer:" + k + "]", v.next_sn_r, v.info,
+                    print("     [Peer:" + k + "]", v.info,
                           dict(sorted(v.deposits.items())), dict(sorted(v.reservations.items())))
 
     def print_pending_messages(self):
@@ -210,3 +217,56 @@ class BamiSimulation(TaskManager):
             print("- [Peer:" + peer_id + "] --->", len(peer.overlay.messages))
             for k, v in peer.overlay.messages.items():
                 print("     MSG_ID:", v.payload.msg_id, "APPLICANT:", v.payload.applicant_id, "EVENT:", v.payload.sn_e)
+
+    def print_endpoint_statistics(self):
+        print("\n-------------- Endpoint statistics -------------")
+        total_num_up = total_bytes_up = 0
+        for peer in self.nodes:
+            peer_id = get_peer_id(peer.overlay.my_peer)
+            print("- [Peer:" + peer_id + "] --->")
+            for i in range(1, 19):
+                msg_statistics = peer.endpoint.get_statistics(peer.overlay.get_prefix())
+                if i in msg_statistics:
+                    total_num_up += msg_statistics[i].num_up
+                    total_bytes_up += msg_statistics[i].bytes_up
+                    print("     MSG_ID:" + str(i), "--->", msg_statistics[i].num_up, msg_statistics[i].bytes_up)
+        print("- TOTAL --->", total_num_up, total_bytes_up)
+
+    @staticmethod
+    def experiment1():
+        # HIDRA: one event (simulated nginx, 1024, 80)
+        # Light-HIDRA (no domains): one event (simulated nginx, 1024, 80), intra, no requests_per_epoch
+        # Light-HIDRA (with domains): one event (simulated nginx, 1024, 80), inter, no requests_per_epoch, peers_per_domain = 5
+
+        # Figure
+        fig, ax = plt.subplots(layout='constrained')
+
+        # Figure data
+        fanouts = (10, 25, 50, 100)
+        bandwidth = {
+            'HIDRA': (1, 2, 3, 4),
+            'Light-HIDRA (no domains)': (1, 2, 3, 4),
+            'Light-HIDRA (with domains)': (1, 2, 3, 4),
+        }
+        x = np.arange(len(fanouts))
+        width = 0.25
+        multiplier = 0
+        for k, v in bandwidth.items():
+            offset = width * multiplier
+            bar = ax.bar(x + offset, v, width, label=k)
+            ax.bar_label(bar)
+            multiplier += 1
+
+        # X-axis
+        ax.set_xlabel('Peers', fontweight="bold", fontsize=12)
+        ax.set_xticks(x + width, fanouts)
+
+        # Y-axis
+        ax.set_ylabel('Bandwidth (bytes)', fontweight="bold", fontsize=12)
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
+        # Figure style
+        ax.legend(loc="upper center", bbox_to_anchor=(0, 1, 1, 0.09), ncol=3, frameon=False)
+        ax.set_axisbelow(True)
+        plt.grid(True, alpha=0.33)
+        plt.show()

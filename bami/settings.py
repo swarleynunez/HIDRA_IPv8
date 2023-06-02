@@ -8,7 +8,7 @@ class SimulationSettings:
     domains: int = 5
 
     # Number of IPv8 peers per HIDRA domain
-    peers_per_domain: int = 20
+    peers_per_domain: int = 5
 
     # Number of IPv8 peers
     peers: int = domains * peers_per_domain
@@ -32,11 +32,11 @@ class SimulationSettings:
     logging_level: str = "INFO"
 
     # Whether we enable statistics like message sizes and frequencies
-    enable_community_statistics: bool = False
+    enable_community_statistics: bool = True
 
     # Optional CSV file with a latency matrix (space-separated)
     latencies_file: Optional[str] = "data/latencies.txt"
 
     # The IPv8 ticker is responsible for community walking and discovering other peers, but can significantly limit
     # performance. Setting this option to False cancels the IPv8 ticker, improving performance
-    enable_ipv8_ticker: bool = True
+    enable_ipv8_ticker: bool = False

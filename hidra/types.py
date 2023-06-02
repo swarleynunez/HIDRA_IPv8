@@ -34,7 +34,6 @@ class HIDRAPeer:
         self.info: HIDRAPeerInfo = None
         self.resource_replies = {}
         self.deposits = {}
-        self.next_sn_r = 0  # Next resource reservation expected to be received
         self.reservations = {}
 
 

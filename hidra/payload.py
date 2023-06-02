@@ -180,18 +180,6 @@ class ReservationEchoPayload:
     sn_e: int
     sn_r: int
     vote: bool
-    event_info: bytes
-
-    @staticmethod
-    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
-        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
-        d = json.loads(serialized_obj.decode("utf-8"))
-        event_info = HIDRAEventInfo(**d)
-        event_info.workload = HIDRAWorkload(**d["workload"])
-        return event_info
 
 
 @dataclass(msg_id=RESERVATION_READY)
@@ -202,18 +190,7 @@ class ReservationReadyPayload:
 
     applicant_id: str
     sn_e: int
-    event_info: bytes
-
-    @staticmethod
-    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
-        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
-        d = json.loads(serialized_obj.decode("utf-8"))
-        event_info = HIDRAEventInfo(**d)
-        event_info.workload = HIDRAWorkload(**d["workload"])
-        return event_info
+    sn_r: int
 
 
 @dataclass(msg_id=RESERVATION_CANCEL)
@@ -234,18 +211,6 @@ class ReservationCreditPayload:
 
     applicant_id: str
     sn_e: int
-    event_info: bytes
-
-    @staticmethod
-    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
-        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
-        d = json.loads(serialized_obj.decode("utf-8"))
-        event_info = HIDRAEventInfo(**d)
-        event_info.workload = HIDRAWorkload(**d["workload"])
-        return event_info
 
 
 @dataclass(msg_id=EVENT_CONFIRM)
@@ -256,18 +221,6 @@ class EventConfirmPayload:
 
     applicant_id: str
     sn_e: int
-    event_info: bytes
-
-    @staticmethod
-    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
-        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
-        d = json.loads(serialized_obj.decode("utf-8"))
-        event_info = HIDRAEventInfo(**d)
-        event_info.workload = HIDRAWorkload(**d["workload"])
-        return event_info
 
 
 @dataclass(msg_id=EVENT_CANCEL)
@@ -278,7 +231,6 @@ class EventCancelPayload:
 
     applicant_id: str
     sn_e: int
-    solver_id: str
 
 
 @dataclass(msg_id=MONITORING_REQUEST)
@@ -341,15 +293,7 @@ class MonitoringEchoPayload:
 
     applicant_id: str
     sn_e: int
-    monitoring_results: bytes
-
-    @staticmethod
-    def fix_pack_monitoring_results(dictionary: dict) -> bytes:
-        return json.dumps(dictionary).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_monitoring_results(cls, serialized_dict: bytes) -> dict:
-        return json.loads(serialized_dict.decode("utf-8"))
+    monitoring_results_hash: bytes
 
 
 @dataclass(msg_id=MONITORING_CREDIT)
@@ -360,12 +304,5 @@ class MonitoringCreditPayload:
 
     applicant_id: str
     sn_e: int
-    monitoring_results: bytes
-
-    @staticmethod
-    def fix_pack_monitoring_results(dictionary: dict) -> bytes:
-        return json.dumps(dictionary).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_monitoring_results(cls, serialized_dict: bytes) -> dict:
-        return json.loads(serialized_dict.decode("utf-8"))
+    ts_end: str
+    monitoring_results_hash: bytes
