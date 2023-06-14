@@ -6,10 +6,7 @@ import time
 from asyncio import sleep
 from typing import Optional
 
-import numpy as np
 import yappi
-from matplotlib import pyplot as plt
-from matplotlib.ticker import MaxNLocator
 
 from hidra.community import HIDRACommunity
 from pyipv8.ipv8.messaging.interfaces.statistics_endpoint import StatisticsEndpoint
@@ -158,14 +155,18 @@ class BamiSimulation(TaskManager):
 
         self.loop.stop()
 
-    async def on_ipv8_ready(self) -> None:
+    def on_ipv8_ready(self) -> None:
         """
         This method is called when IPv8 is started and peer discovery is finished.
         """
 
-        # HIDRA
+        # Initialize HIDRA peers
         for node in self.nodes:
-            await node.overlay.start()
+            node.overlay.initialize_peer()
+
+        # Execute HIDRA network
+        for node in self.nodes:
+            node.overlay.start()
 
     def on_simulation_finished(self) -> None:
         """
@@ -181,7 +182,7 @@ class BamiSimulation(TaskManager):
         await self.start_ipv8_nodes()
         await self.ipv8_discover_peers()
         self.apply_latencies()
-        await self.on_ipv8_ready()
+        self.on_ipv8_ready()
         print("Simulation setup took %f seconds" % (time.time() - start_time))
         await self.start_simulation()
         self.on_simulation_finished()
@@ -196,9 +197,6 @@ class BamiSimulation(TaskManager):
         self.print_local_state()
         self.print_pending_messages()
         self.print_endpoint_statistics()
-
-        # Experiments
-        # self.experiment1()
 
     def print_local_state(self):
         print("\n----------------- Local state ------------------")
@@ -224,49 +222,10 @@ class BamiSimulation(TaskManager):
         for peer in self.nodes:
             peer_id = get_peer_id(peer.overlay.my_peer)
             print("- [Peer:" + peer_id + "] --->")
+            msg_statistics = peer.endpoint.get_statistics(peer.overlay.get_prefix())
             for i in range(1, 19):
-                msg_statistics = peer.endpoint.get_statistics(peer.overlay.get_prefix())
                 if i in msg_statistics:
                     total_num_up += msg_statistics[i].num_up
                     total_bytes_up += msg_statistics[i].bytes_up
                     print("     MSG_ID:" + str(i), "--->", msg_statistics[i].num_up, msg_statistics[i].bytes_up)
         print("- TOTAL --->", total_num_up, total_bytes_up)
-
-    @staticmethod
-    def experiment1():
-        # HIDRA: one event (simulated nginx, 1024, 80)
-        # Light-HIDRA (no domains): one event (simulated nginx, 1024, 80), intra, no requests_per_epoch
-        # Light-HIDRA (with domains): one event (simulated nginx, 1024, 80), inter, no requests_per_epoch, peers_per_domain = 5
-
-        # Figure
-        fig, ax = plt.subplots(layout='constrained')
-
-        # Figure data
-        fanouts = (10, 25, 50, 100)
-        bandwidth = {
-            'HIDRA': (1, 2, 3, 4),
-            'Light-HIDRA (no domains)': (1, 2, 3, 4),
-            'Light-HIDRA (with domains)': (1, 2, 3, 4),
-        }
-        x = np.arange(len(fanouts))
-        width = 0.25
-        multiplier = 0
-        for k, v in bandwidth.items():
-            offset = width * multiplier
-            bar = ax.bar(x + offset, v, width, label=k)
-            ax.bar_label(bar)
-            multiplier += 1
-
-        # X-axis
-        ax.set_xlabel('Peers', fontweight="bold", fontsize=12)
-        ax.set_xticks(x + width, fanouts)
-
-        # Y-axis
-        ax.set_ylabel('Bandwidth (bytes)', fontweight="bold", fontsize=12)
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-
-        # Figure style
-        ax.legend(loc="upper center", bbox_to_anchor=(0, 1, 1, 0.09), ncol=3, frameon=False)
-        ax.set_axisbelow(True)
-        plt.grid(True, alpha=0.33)
-        plt.show()

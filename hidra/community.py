@@ -1,11 +1,13 @@
 import asyncio
 import json
+import os
 import random
+import time
 from asyncio import get_event_loop
-from binascii import unhexlify
 from collections import Counter
 
 from bami.settings import SimulationSettings
+from deployment.settings import DeploymentSettings
 from hidra.payload import REQUEST_RESOURCE_INFO, RESOURCE_INFO, RequestResourceInfoPayload, ResourceInfoPayload, \
     LockingSendPayload, LOCKING_SEND, LOCKING_ECHO, LOCKING_READY, LockingEchoPayload, LockingCreditPayload, \
     RESERVATION_ECHO, RESERVATION_READY, RESERVATION_CREDIT, LOCKING_CREDIT, RESERVATION_CANCEL, LockingReadyPayload, \
@@ -33,7 +35,7 @@ class HIDRACommunity(Community):
     HIDRA community
     """
 
-    community_id = unhexlify("2d606de41ee6595b2d3d5c57065b78bf17870f32")
+    community_id = os.urandom(20)
 
     def __init__(self, my_peer, endpoint, network) -> None:
         super().__init__(my_peer, endpoint, network)
@@ -94,12 +96,7 @@ class HIDRACommunity(Community):
     ########
     # Peer #
     ########
-    async def start(self) -> None:
-        # Register asyncio tasks with the community
-        # This ensures that tasks end when the community is unloaded
-        self.register_task("initialize_peer", self.initialize_peer)
-        await self.wait_for_tasks()
-
+    def start(self) -> None:
         # To avoid missing IPv8 messages due to an early simulation end
         self.register_task("process_pending_messages", self.process_pending_messages, interval=1)
 
@@ -117,6 +114,8 @@ class HIDRACommunity(Community):
                 # Next event sequence number
                 sn_e = self.next_sn_e
                 self.next_sn_e += 1
+
+                print("Starting at %d" % time.time_ns())
 
                 # Solver Selection Phase (SSP)
                 self.register_task("ssp_" + str(sn_e), self.ssp, sn_e, delay=delay)
@@ -147,7 +146,11 @@ class HIDRACommunity(Community):
         peers.sort(key=lambda o: o.mid)
 
         # Set system domains
-        n = SimulationSettings.peers_per_domain
+        if self.settings.deployment_mode:
+            n = DeploymentSettings.peers_per_domain
+        else:
+            n = SimulationSettings.peers_per_domain
+
         for i in range(0, len(peers), n):
             domain_peers = peers[i:i + n]
 
@@ -276,7 +279,7 @@ class HIDRACommunity(Community):
 
         # Debug
         if self.settings.message_debug:
-            print("[" + format(self.get_current_time(), ".3f") +
+            print("[" + str(self.get_current_time()) +
                   "][Domain:" + str(self.parent_domain_id) +
                   "][Peer:" + self.my_peer_id +
                   "] Sending RequestResourceInfo ---> " +
@@ -286,7 +289,7 @@ class HIDRACommunity(Community):
 
         # Applicant sends RequestResourceInfo messages to the selected domain
         for peer in self.domains[to_domain_id]:
-            self.ez_send(peer, RequestResourceInfoPayload(self.my_peer_id, sn_e, event_info))
+            self.ez_send(peer, RequestResourceInfoPayload(self.my_peer_id, sn_e))
 
     # SELECTED DOMAIN
     def process_request_resource_info_message(self, sender, payload) -> None:
@@ -298,14 +301,14 @@ class HIDRACommunity(Community):
         # Payload data
         # TODO: Check event info to make a decision
         available = random.choice([True, False])
-        resource_replies = {}
-        for peer in self.domains[self.parent_domain_id]:
-            peer_id = get_peer_id(peer)
-            resource_replies[peer_id] = self.peers[peer_id].info
+        # resource_replies = {}
+        # for peer in self.domains[self.parent_domain_id]:
+        #     peer_id = get_peer_id(peer)
+        #     resource_replies[peer_id] = self.peers[peer_id].info
 
         # Debug
         if self.settings.message_debug:
-            print("[" + format(self.get_current_time(), ".3f") +
+            print("[" + str(self.get_current_time()) +
                   "][Domain:" + str(self.parent_domain_id) +
                   "][Peer:" + self.my_peer_id +
                   "] Sending ResourceInfo ---> " +
@@ -315,7 +318,7 @@ class HIDRACommunity(Community):
                   ", Available:" + ("T" if available else "F"))
 
         # Selected domain sends ResourceInfo messages to the Applicant
-        self.ez_send(sender, ResourceInfoPayload(payload.applicant_id, payload.sn_e, available, resource_replies))
+        self.ez_send(sender, ResourceInfoPayload(payload.applicant_id, payload.sn_e, available))
 
     # APPLICANT
     def process_resource_info_message(self, sender, payload) -> None:
@@ -331,15 +334,15 @@ class HIDRACommunity(Community):
             self.events[get_object_id(self.my_peer_id, payload.sn_e)].available_peers.append(sender_id)
 
         # Deliver resource replies
-        for k, v in payload.resource_replies.items():
-            # Update storage
-            self.peers[k].resource_replies[sender_id] = v
+        # for k, v in payload.resource_replies.items():
+        #     # Update storage
+        #     self.peers[k].resource_replies[sender_id] = v
 
-            # TODO: Select peer info from resource replies
-            # peer_info = self.select_peer_info(self.peers[k].resource_replies)
-            # if peer_info:
-            #     # Update storage
-            #     self.peers[k].info = peer_info
+        # TODO: Select peer info from resource replies
+        # peer_info = self.select_peer_info(self.peers[k].resource_replies)
+        # if peer_info:
+        #     # Update storage
+        #     self.peers[k].info = peer_info
 
     # APPLICANT
     def wrp(self, sn_e) -> None:
@@ -347,7 +350,7 @@ class HIDRACommunity(Community):
 
         # Requirements
         if len(event.available_peers) == 0:
-            print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Domain:" + str(event.info.to_domain_id) +
+            print("[" + str(self.get_current_time()) + "] INFO ---> Domain:" + str(event.info.to_domain_id) +
                   " not available for Applicant:" + self.my_peer_id + ", Event:" + str(sn_e) + " ---> Retrying...")
             self.replace_task("ssp_" + str(sn_e), self.ssp, sn_e)
             self.replace_task("wrp_" + str(sn_e), self.wrp, sn_e, delay=self.settings.ssp_timeout)
@@ -358,11 +361,11 @@ class HIDRACommunity(Community):
 
         # Update storage
         event.info.solver_id = solver_id
-        event.info.ts_start = float(self.get_current_time() + self.settings.wrp_timeout)
+        event.info.ts_start = self.get_current_time() + self.settings.wrp_timeout
 
         # Debug
         if self.settings.message_debug:
-            print("[" + format(self.get_current_time(), ".3f") +
+            print("[" + str(self.get_current_time()) +
                   "][Domain:" + str(self.parent_domain_id) +
                   "][Peer:" + self.my_peer_id +
                   "] Sending LockingSend ---> " +
@@ -399,14 +402,14 @@ class HIDRACommunity(Community):
         if deposit > self.get_available_balance(applicant):
             if not event_id in self.pending_events:
                 self.pending_events.append(event_id)
-                print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Applicant:" + payload.applicant_id +
+                print("[" + str(self.get_current_time()) + "] INFO ---> Applicant:" + payload.applicant_id +
                       " does not have enough balance for Event:" + str(payload.sn_e) + " ---> Waiting...")
             await self.add_pending_message(sender, payload)
             return
         else:
             if event_id in self.pending_events:
                 self.pending_events.remove(event_id)
-                print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Applicant:" + payload.applicant_id +
+                print("[" + str(self.get_current_time()) + "] INFO ---> Applicant:" + payload.applicant_id +
                       " has obtained balance for Event:" + str(payload.sn_e) + " ---> Retrying...")
 
         # Update storage
@@ -417,7 +420,7 @@ class HIDRACommunity(Community):
 
         # Debug
         if self.settings.message_debug:
-            print("[" + format(self.get_current_time(), ".3f") +
+            print("[" + str(self.get_current_time()) +
                   "][Domain:" + str(self.parent_domain_id) +
                   "][Peer:" + self.my_peer_id +
                   "] Sending LockingEcho ---> " +
@@ -462,7 +465,7 @@ class HIDRACommunity(Community):
 
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending LockingReady ---> " +
@@ -507,7 +510,7 @@ class HIDRACommunity(Community):
 
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending LockingReady ---> " +
@@ -524,7 +527,7 @@ class HIDRACommunity(Community):
         if self.has_required_replies(event.locking_readys, self.required_replies_for_quorum()):
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending LockingCredit ---> " +
@@ -577,7 +580,7 @@ class HIDRACommunity(Community):
 
                 # Debug
                 if self.settings.message_debug:
-                    print("[" + format(self.get_current_time(), ".3f") +
+                    print("[" + str(self.get_current_time()) +
                           "][Domain:" + str(self.parent_domain_id) +
                           "][Peer:" + self.my_peer_id +
                           "] Sending ReservationEcho ---> " +
@@ -597,8 +600,6 @@ class HIDRACommunity(Community):
                     self.ez_send(peer, ReservationEchoPayload(payload.applicant_id, payload.sn_e, sn_r, True))
             else:
                 if solver_id in event.reservation_echos:
-                    solver = self.peers[solver_id]
-
                     # Get reservation sequence number chosen by the Solver
                     sn_r = int(event.reservation_echos[solver_id].split(":")[2])
 
@@ -613,7 +614,7 @@ class HIDRACommunity(Community):
 
                     # Debug
                     if self.settings.message_debug:
-                        print("[" + format(self.get_current_time(), ".3f") +
+                        print("[" + str(self.get_current_time()) +
                               "][Domain:" + str(self.parent_domain_id) +
                               "][Peer:" + self.my_peer_id +
                               "] Sending ReservationEcho ---> " +
@@ -673,7 +674,7 @@ class HIDRACommunity(Community):
             # In case of negative equal echos (i.e. repeated sn_r)
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending ReservationCancel (REPEATED RESERVATION) ---> " +
@@ -694,14 +695,14 @@ class HIDRACommunity(Community):
             # Enough resources?
             resource_limit = event.info.workload.resource_limit
             if resource_limit > self.get_free_resources(solver):
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "] INFO ---> Solver:" + solver_id + " does not have enough resources for Applicant:" +
                       payload.applicant_id + ", Event:" + str(payload.sn_e) + ", Reservation:" + str(payload.sn_r) +
                       " ---> Cancelling...")
 
                 # Debug
                 if self.settings.message_debug:
-                    print("[" + format(self.get_current_time(), ".3f") +
+                    print("[" + str(self.get_current_time()) +
                           "][Domain:" + str(self.parent_domain_id) +
                           "][Peer:" + self.my_peer_id +
                           "] Sending ReservationCancel (NOT ENOUGH RESOURCES) ---> " +
@@ -720,7 +721,7 @@ class HIDRACommunity(Community):
 
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending ReservationReady ---> " +
@@ -770,14 +771,14 @@ class HIDRACommunity(Community):
             # Enough resources?
             resource_limit = event.info.workload.resource_limit
             if resource_limit > self.get_free_resources(solver):
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "] INFO ---> Solver:" + solver_id + " does not have enough resources for Applicant:" +
                       payload.applicant_id + ", Event:" + str(payload.sn_e) + ", Reservation:" + str(payload.sn_r) +
                       " ---> Cancelling...")
 
                 # Debug
                 if self.settings.message_debug:
-                    print("[" + format(self.get_current_time(), ".3f") +
+                    print("[" + str(self.get_current_time()) +
                           "][Domain:" + str(self.parent_domain_id) +
                           "][Peer:" + self.my_peer_id +
                           "] Sending ReservationCancel (NOT ENOUGH RESOURCES) ---> " +
@@ -796,7 +797,7 @@ class HIDRACommunity(Community):
 
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending ReservationReady ---> " +
@@ -814,13 +815,13 @@ class HIDRACommunity(Community):
             # Start workload (simulated)
             solver_id = event.info.solver_id
             if self.my_peer_id == solver_id:
-                print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Solver:" + solver_id +
+                print("[" + str(self.get_current_time()) + "] INFO ---> Solver:" + solver_id +
                       " is now executing the workload for Applicant:" + payload.applicant_id +
                       ", Event:" + str(payload.sn_e) + ", Reservation:" + str(payload.sn_r))
 
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending ReservationCredit ---> " +
@@ -897,7 +898,7 @@ class HIDRACommunity(Community):
             if self.get_current_time() <= ts_start:
                 # Debug
                 if self.settings.message_debug:
-                    print("[" + format(self.get_current_time(), ".3f") +
+                    print("[" + str(self.get_current_time()) +
                           "][Domain:" + str(self.parent_domain_id) +
                           "][Peer:" + self.my_peer_id +
                           "] Sending EventConfirm ---> " +
@@ -918,7 +919,7 @@ class HIDRACommunity(Community):
 
                 # Debug
                 if self.settings.message_debug:
-                    print("[" + format(self.get_current_time(), ".3f") +
+                    print("[" + str(self.get_current_time()) +
                           "][Domain:" + str(self.parent_domain_id) +
                           "][Peer:" + self.my_peer_id +
                           "] Sending EventCancel ---> " +
@@ -1008,7 +1009,7 @@ class HIDRACommunity(Community):
 
             # Stop workload (simulated)
             if self.my_peer_id == event.info.solver_id:
-                print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Solver:" + event.info.solver_id +
+                print("[" + str(self.get_current_time()) + "] INFO ---> Solver:" + event.info.solver_id +
                       " has stopped the workload for Applicant:" + payload.applicant_id +
                       ", Event:" + str(payload.sn_e) + ", StartTime:" + str(event.info.ts_start))
 
@@ -1036,7 +1037,7 @@ class HIDRACommunity(Community):
 
                         # Debug
                         if self.settings.message_debug:
-                            print("[" + format(self.get_current_time(), ".3f") +
+                            print("[" + str(self.get_current_time()) +
                                   "][Domain:" + str(self.parent_domain_id) +
                                   "][Peer:" + self.my_peer_id +
                                   "] Sending MonitoringRequest ---> " +
@@ -1066,7 +1067,7 @@ class HIDRACommunity(Community):
 
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending MonitoringResult ---> " +
@@ -1090,7 +1091,7 @@ class HIDRACommunity(Community):
 
         # Debug
         if self.settings.message_debug:
-            print("[" + format(self.get_current_time(), ".3f") +
+            print("[" + str(self.get_current_time()) +
                   "][Domain:" + str(self.parent_domain_id) +
                   "][Peer:" + self.my_peer_id +
                   "] Sending MonitoringResponse ---> " +
@@ -1125,7 +1126,7 @@ class HIDRACommunity(Community):
 
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending MonitoringResult ---> " +
@@ -1150,7 +1151,7 @@ class HIDRACommunity(Community):
             return
         data = payload.applicant_id + ":" + str(payload.sn_e) + ":" + payload.ts_end
         if not verify_sign(sender.public_key, data, payload.signature):
-            print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Validator:" + sender_id +
+            print("[" + str(self.get_current_time()) + "] INFO ---> Validator:" + sender_id +
                   " sent an invalid signature for Applicant:" + payload.applicant_id + ", Event:" + str(payload.sn_e))
             # Dismiss the message...
             return
@@ -1166,7 +1167,7 @@ class HIDRACommunity(Community):
         if len(event.monitoring_results) == self.required_replies_for_quorum():
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending MonitoringSend ---> " +
@@ -1188,14 +1189,14 @@ class HIDRACommunity(Community):
             # Dismiss the message...
             return
         if len(payload.monitoring_results) != self.required_replies_for_quorum():
-            print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Invalid monitoring QC for Applicant:" +
+            print("[" + str(self.get_current_time()) + "] INFO ---> Invalid monitoring QC for Applicant:" +
                   payload.applicant_id + ", Event:" + str(payload.sn_e))
             # Dismiss the message...
             return
         for k, v in payload.monitoring_results.items():
             data = payload.applicant_id + ":" + str(payload.sn_e) + ":" + v[0]
             if not verify_sign(self.get_peer_from_id(k).public_key, data, bytes(v[1], "latin1")):
-                print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Invalid monitoring QC for Applicant:"
+                print("[" + str(self.get_current_time()) + "] INFO ---> Invalid monitoring QC for Applicant:"
                       + payload.applicant_id + ", Event:" + str(payload.sn_e))
                 # Dismiss the message...
                 return
@@ -1209,7 +1210,7 @@ class HIDRACommunity(Community):
 
         # Debug
         if self.settings.message_debug:
-            print("[" + format(self.get_current_time(), ".3f") +
+            print("[" + str(self.get_current_time()) +
                   "][Domain:" + str(self.parent_domain_id) +
                   "][Peer:" + self.my_peer_id +
                   "] Sending MonitoringEcho ---> " +
@@ -1248,7 +1249,7 @@ class HIDRACommunity(Community):
 
             # Checking mismatched QCs sent by the Applicant
             if hash_dict(event.monitoring_results) != payload.monitoring_results_hash:
-                print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Invalid monitoring QC for Applicant:"
+                print("[" + str(self.get_current_time()) + "] INFO ---> Invalid monitoring QC for Applicant:"
                       + payload.applicant_id + ", Event:" + str(payload.sn_e))
                 # Dismiss the message...
                 return
@@ -1258,7 +1259,7 @@ class HIDRACommunity(Community):
 
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending MonitoringCredit ---> " +
@@ -1306,7 +1307,7 @@ class HIDRACommunity(Community):
 
             # Checking mismatched QCs sent by the Applicant
             if hash_dict(event.monitoring_results) != payload.monitoring_results_hash:
-                print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Invalid monitoring QC for Applicant:"
+                print("[" + str(self.get_current_time()) + "] INFO ---> Invalid monitoring QC for Applicant:"
                       + payload.applicant_id + ", Event:" + str(payload.sn_e))
                 # Dismiss the message...
                 return
@@ -1316,7 +1317,7 @@ class HIDRACommunity(Community):
 
             # Debug
             if self.settings.message_debug:
-                print("[" + format(self.get_current_time(), ".3f") +
+                print("[" + str(self.get_current_time()) +
                       "][Domain:" + str(self.parent_domain_id) +
                       "][Peer:" + self.my_peer_id +
                       "] Sending MonitoringCredit ---> " +
@@ -1360,9 +1361,11 @@ class HIDRACommunity(Community):
 
                 # Release workload resources (simulated)
                 if self.my_peer_id == event.info.solver_id:
-                    print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Solver:" + event.info.solver_id +
+                    print("[" + str(self.get_current_time()) + "] INFO ---> Solver:" + event.info.solver_id +
                           " has completed the workload for Applicant:" + payload.applicant_id +
                           ", Event:" + str(payload.sn_e) + ", Payment:" + str(final_payment))
+
+                    print("Ending at %d" % time.time_ns())
 
     ############
     # Messages #
@@ -1428,9 +1431,11 @@ class HIDRACommunity(Community):
     #########
     # Utils #
     #########
-    @staticmethod
-    def get_current_time() -> float:
-        return round(get_event_loop().time(), 9)
+    def get_current_time(self):
+        if self.settings.deployment_mode:
+            return int(time.time())
+        else:
+            return round(get_event_loop().time(), 9)
 
     def select_domain(self) -> int:
         if len(self.domains) > 1 and self.settings.domain_selection_policy == "inter":
@@ -1468,21 +1473,25 @@ class HIDRACommunity(Community):
 
         return peer.info.r_max - reserved
 
-    @staticmethod
-    def required_replies_for_quorum() -> int:
+    def required_replies_for_quorum(self) -> int:
         """
         Number of required replies to get a quorum certificate on a message
         """
 
-        return 2 * SimulationSettings.faulty_peers + 1
+        if self.settings.deployment_mode:
+            return 2 * DeploymentSettings.faulty_peers + 1
+        else:
+            return 2 * SimulationSettings.faulty_peers + 1
 
-    @staticmethod
-    def required_replies_for_proof() -> int:
+    def required_replies_for_proof(self) -> int:
         """
         Number of required replies to prove a message
         """
 
-        return SimulationSettings.faulty_peers + 1
+        if self.settings.deployment_mode:
+            return DeploymentSettings.faulty_peers + 1
+        else:
+            return SimulationSettings.faulty_peers + 1
 
     def get_peer_from_id(self, peer_id: str) -> Peer:
         for v in self.domains.values():
@@ -1496,13 +1505,15 @@ class HIDRACommunity(Community):
                 if get_peer_id(peer) == peer_id:
                     return k
 
-    @staticmethod
-    def select_shared_ts_end(monitoring_results: dict) -> str:
+    def select_shared_ts_end(self, monitoring_results: dict) -> str:
         # Sort monitoring results by ts_end (in ascending order)
         mr = sorted(monitoring_results.items(), key=lambda i: float(i[1][0]))
 
         # Select the (f + 1)-th smallest ts_end
-        return mr[SimulationSettings.faulty_peers][1][0]
+        if self.settings.deployment_mode:
+            return mr[DeploymentSettings.faulty_peers][1][0]
+        else:
+            return mr[SimulationSettings.faulty_peers][1][0]
 
     ###############
     # Experiments #
@@ -1511,7 +1522,7 @@ class HIDRACommunity(Community):
         global FAULTY_PEER
         if not FAULTY_PEER:
             FAULTY_PEER = peer_id
-            print("[" + format(self.get_current_time(), ".3f") + "] INFO ---> Peer:" + peer_id + " set as faulty peer")
+            print("[" + str(self.get_current_time()) + "] INFO ---> Peer:" + peer_id + " set as faulty peer")
 
     @staticmethod
     def is_faulty_peer(peer_id: str) -> bool:

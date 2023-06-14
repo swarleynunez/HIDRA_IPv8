@@ -1,9 +1,8 @@
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
-class SimulationSettings:
+class DeploymentSettings:
     # Number of HIDRA domains
     domains: int = 1
 
@@ -16,26 +15,14 @@ class SimulationSettings:
     # Maximum number of faulty peers per domain
     faulty_peers: int = peers_per_domain // 3
 
-    # The name of the experiment
-    name: str = ""
+    # The duration of the execution in seconds
+    duration: int = 10
 
-    # Whether to run the Yappi profiler
-    profile: bool = False
-
-    # An optional identifier for the experiment, appended to the working directory name
-    identifier: Optional[str] = None
-
-    # The duration of the simulation in seconds
-    duration: int = 180
-
-    # The logging level during the experiment
+    # The logging level during the deployment
     logging_level: str = "INFO"
 
     # Whether we enable statistics like message sizes and frequencies
     enable_community_statistics: bool = True
-
-    # Optional CSV file with a latency matrix (space-separated)
-    latencies_file: Optional[str] = "data/latencies.txt"
 
     # The IPv8 ticker is responsible for community walking and discovering other peers, but can significantly limit
     # performance. Setting this option to False cancels the IPv8 ticker, improving performance

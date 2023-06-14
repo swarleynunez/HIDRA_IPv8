@@ -59,7 +59,7 @@ class HIDRAEventInfo:
     """
 
     def __init__(self, from_domain_id: int, to_domain_id: int, solver_id: str, workload: HIDRAWorkload,
-                 t_exec_value: int, p_ratio_value: int, ts_start: float):
+                 t_exec_value: int, p_ratio_value: int, ts_start):
         self.from_domain_id = from_domain_id
         self.to_domain_id = to_domain_id
         self.solver_id = solver_id

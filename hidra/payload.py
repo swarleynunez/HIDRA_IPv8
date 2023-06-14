@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from pyipv8.ipv8.messaging.payload_dataclass import overwrite_dataclass
 
-from hidra.types import HIDRAEventInfo, HIDRAPeerInfo, HIDRAWorkload
+from hidra.types import HIDRAEventInfo, HIDRAWorkload
 
 # Enhance normal dataclasses for IPv8
 dataclass = overwrite_dataclass(dataclass)
@@ -45,18 +45,18 @@ class RequestResourceInfoPayload:
 
     applicant_id: str
     sn_e: int
-    event_info: bytes
-
-    @staticmethod
-    def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
-        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
-        d = json.loads(serialized_obj.decode("utf-8"))
-        event_info = HIDRAEventInfo(**d)
-        event_info.workload = HIDRAWorkload(**d["workload"])
-        return event_info
+    # event_info: bytes
+    #
+    # @staticmethod
+    # def fix_pack_event_info(obj: HIDRAEventInfo) -> bytes:
+    #     return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+    #
+    # @classmethod
+    # def fix_unpack_event_info(cls, serialized_obj: bytes) -> HIDRAEventInfo:
+    #     d = json.loads(serialized_obj.decode("utf-8"))
+    #     event_info = HIDRAEventInfo(**d)
+    #     event_info.workload = HIDRAWorkload(**d["workload"])
+    #     return event_info
 
 
 @dataclass(msg_id=RESOURCE_INFO)
@@ -68,18 +68,18 @@ class ResourceInfoPayload:
     applicant_id: str
     sn_e: int
     available: bool
-    resource_replies: bytes
-
-    @staticmethod
-    def fix_pack_resource_replies(obj: [HIDRAPeerInfo]) -> bytes:
-        return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
-
-    @classmethod
-    def fix_unpack_resource_replies(cls, serialized_obj: bytes) -> [HIDRAPeerInfo]:
-        d = json.loads(serialized_obj.decode("utf-8"))
-        for k, v in d.items():
-            d[k] = HIDRAPeerInfo(**v)
-        return d
+    # resource_replies: bytes
+    #
+    # @staticmethod
+    # def fix_pack_resource_replies(obj: [HIDRAPeerInfo]) -> bytes:
+    #     return json.dumps(obj, default=lambda o: o.__dict__).encode("utf-8")
+    #
+    # @classmethod
+    # def fix_unpack_resource_replies(cls, serialized_obj: bytes) -> [HIDRAPeerInfo]:
+    #     d = json.loads(serialized_obj.decode("utf-8"))
+    #     for k, v in d.items():
+    #         d[k] = HIDRAPeerInfo(**v)
+    #     return d
 
 
 @dataclass(msg_id=LOCKING_SEND)
